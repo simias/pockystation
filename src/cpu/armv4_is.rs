@@ -36,13 +36,17 @@ impl Instruction {
         RegisterIndex((self.0 >> 16) & 0xf)
     }
 
+    fn rm(self) -> RegisterIndex {
+        RegisterIndex(self.0 & 0xf)
+    }
+
     /// Addressing mode 1: 32bit immediate value
-    fn mode1_imm(self, carry_in: bool) -> (u32, bool) {
+    fn mode1_imm(self, cpu: &Cpu) -> (u32, bool) {
         let rot = (self.0 >> 8) & 0xf;
         let imm = self.0 & 0xff;
 
         if rot == 0 {
-            (imm, carry_in)
+            (imm, cpu.c())
         } else {
             // Rotation factor is multiplied by two
             let rot = rot << 1;
@@ -56,7 +60,7 @@ impl Instruction {
     }
 
     /// Addressing mode 1: 32bit immediate value. Used when shifter
-    /// carry is not used
+    /// carry is not needed.
     fn mode1_imm_no_carry(self) -> u32 {
         let rot = (self.0 >> 8) & 0xf;
         let imm = self.0 & 0xff;
@@ -67,9 +71,25 @@ impl Instruction {
         imm.rotate_right(rot)
     }
 
+    /// Addressing mode 1: Logicat shift left my immediate. Used when
+    /// shifter carry is not needed.
+    fn mode1_register_lshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
+        let shift = (self.0 >> 7) & 0x1f;
+        let rm = self.rm();
+
+        let val = cpu.reg(rm);
+
+        val << shift
+    }
+
     /// Addressing mode 2: immediate offset
     fn mode2_offset_imm(self) -> u32 {
         self.0 & 0xfff
+    }
+
+    /// Register list for load/store multiple.
+    fn register_list(self) -> u32 {
+        self.0 & 0xffff
     }
 
     /// Execute this instruction
@@ -142,6 +162,16 @@ fn unimplemented(instruction: Instruction, _: &mut Cpu) {
            instruction.opcode());
 }
 
+fn op000_and_lshift(instruction: Instruction, cpu: &mut Cpu) {
+    let dst = instruction.rd();
+    let rn  = instruction.rn();
+    let and = instruction.mode1_register_lshift_imm_no_carry(cpu);
+
+    let val = cpu.reg(rn) & and;
+
+    cpu.set_reg(dst, val);
+}
+
 fn op24x_sub_i(instruction: Instruction, cpu: &mut Cpu) {
     let dst = instruction.rd();
     let rn  = instruction.rn();
@@ -151,11 +181,55 @@ fn op24x_sub_i(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = a.wrapping_sub(b);
 
-    if dst.is_pc() {
-        cpu.set_pc(val);
-    } else {
-        cpu.set_reg(dst, val);
+    cpu.set_reg(dst, val);
+}
+
+fn op31x_tst_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rn       = instruction.rn();
+    let rd       = instruction.rd();
+    let (imm, c) = instruction.mode1_imm(cpu);
+
+    if rd != RegisterIndex(0) {
+        // "should be zero"
+        panic!("TST instruction with non-0 Rd");
     }
+
+    let val = cpu.reg(rn) & imm;
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
+}
+
+fn op35x_cmp_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rn  = instruction.rn();
+    let rd  = instruction.rd();
+    let b   = instruction.mode1_imm_no_carry();
+
+    if rd != RegisterIndex(0) {
+        // "should be zero"
+        panic!("CMP instruction with non-0 Rd");
+    }
+
+    let a = cpu.reg(rn);
+
+    let val = a.wrapping_sub(b);
+
+    let a_neg = (a as i32) < 0;
+    let b_neg = (b as i32) < 0;
+    let v_neg = (val as i32) < 0;
+
+    cpu.set_n(v_neg);
+    cpu.set_z(val == 0);
+    cpu.set_c(a >= b);
+    cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
+}
+
+fn op3ax_mov_i(instruction: Instruction, cpu: &mut Cpu) {
+    let dst = instruction.rd();
+    let imm = instruction.mode1_imm_no_carry();
+
+    cpu.set_reg(dst, imm);
 }
 
 fn op59x_ldr_pu(instruction: Instruction, cpu: &mut Cpu) {
@@ -167,25 +241,53 @@ fn op59x_ldr_pu(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.load32(addr);
 
-    if dst.is_pc() {
-        cpu.set_pc(val);
-    } else {
-        cpu.set_reg(dst, val);
-    }
+    cpu.set_reg(dst, val);
 }
 
 fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn = instruction.rn();
+    let rn   = instruction.rn();
+    let list = instruction.register_list();
 
-    panic!("STM {}", rn);
+    if rn.is_pc() {
+        // "unpredictable"
+        panic!("PC-relative STM");
+    }
+
+    let num_regs = list.count_ones();
+
+    let start_addr = cpu.reg(rn).wrapping_sub(4 * num_regs);
+
+    let mut addr = start_addr;
+
+    let first = true;
+
+    for i in 0..16 {
+        if ((list >> i) & 1) != 0 {
+            let reg = RegisterIndex(i);
+
+            // If Rn is specified in the register_list and it's the
+            // first entry then the original value is stored,
+            // otherwise it's "unpredictable".
+            if !first && reg == rn {
+                panic!("Unpredictable STMDB!");
+            }
+
+            let val = cpu.reg(reg);
+            cpu.store32(addr, val);
+
+            addr = addr.wrapping_add(4);
+        }
+    }
+
+    cpu.set_reg(rn, start_addr);
 }
 
 /// 4096-entry LUT used to decode the instruction
 static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x000
+    op000_and_lshift, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op000_and_lshift, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x010
@@ -477,10 +579,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x310
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
+    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
+    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
+    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
 
     // 0x320
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -501,10 +603,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x350
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
+    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
+    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
+    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
 
     // 0x360
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -531,10 +633,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x3a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
+    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
+    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
+    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
 
     // 0x3b0
     unimplemented, unimplemented, unimplemented, unimplemented,

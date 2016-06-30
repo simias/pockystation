@@ -54,16 +54,32 @@ impl Cpu {
         self.n
     }
 
+    fn set_n(&mut self, n: bool) {
+        self.n = n
+    }
+
     fn z(&self) -> bool {
         self.z
+    }
+
+    fn set_z(&mut self, z: bool) {
+        self.z = z
     }
 
     fn c(&self) -> bool {
         self.c
     }
 
+    fn set_c(&mut self, c: bool) {
+        self.c = c
+    }
+
     fn v(&self) -> bool {
         self.v
+    }
+
+    fn set_v(&mut self, v: bool) {
+        self.v = v
     }
 
     fn reg(&self, r: RegisterIndex) -> u32 {
@@ -90,6 +106,14 @@ impl Cpu {
         println!("load {:08x}", addr);
 
         self.inter.read32(addr)
+    }
+
+    fn store32(&mut self, addr: u32, val: u32) {
+        if addr & 3 != 0 {
+            panic!("Unaligned store32! 0x{:08x} {:?}", addr, self);
+        }
+
+        println!("store32 0x{:08x} @ 0x{:08x}", val, addr);
     }
 }
 
