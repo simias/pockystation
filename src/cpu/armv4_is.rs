@@ -87,6 +87,19 @@ impl Instruction {
         self.0 & 0xfff
     }
 
+    fn branch_imm_offset(self) -> u32 {
+        // offset must be sign-extented
+        let offset = (self.0 << 8) as i32;
+
+        // Offset must be multiplied by 4 so we only shift it down 6
+        // places.
+        (offset >> 6) as u32
+    }
+
+    fn msr_field_mask(self) -> u32 {
+        (self.0 >> 16) & 0xf
+    }
+
     /// Register list for load/store multiple.
     fn register_list(self) -> u32 {
         self.0 & 0xffff
@@ -170,6 +183,19 @@ fn op000_and_lshift(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.reg(rn) & and;
 
     cpu.set_reg(dst, val);
+}
+
+fn op120_msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
+    let rm   = instruction.rm();
+    let mask = instruction.msr_field_mask();
+
+    if instruction.0 & 0xff00 != 0xf000 {
+        panic!("Invalid MSR instruction {}", instruction);
+    }
+
+    let val = cpu.reg(rm);
+
+    cpu.msr_cpsr(val, mask);
 }
 
 fn op121_bx(instruction: Instruction, cpu: &mut Cpu) {
@@ -321,6 +347,14 @@ fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rn, start_addr);
 }
 
+fn opa0x_b(instruction: Instruction, cpu: &mut Cpu) {
+    let offset = instruction.branch_imm_offset();
+
+    let pc = cpu.registers[15].wrapping_add(offset);
+
+    cpu.set_pc(pc);
+}
+
 /// 4096-entry LUT used to decode the instruction
 static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x000
@@ -432,7 +466,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x120
-    unimplemented, op121_bx, unimplemented, unimplemented,
+    op120_msr_cpsr, op121_bx, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1284,10 +1318,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0xa00
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opa0x_b, opa0x_b, opa0x_b, opa0x_b,
+    opa0x_b, opa0x_b, opa0x_b, opa0x_b,
+    opa0x_b, opa0x_b, opa0x_b, opa0x_b,
+    opa0x_b, opa0x_b, opa0x_b, opa0x_b,
 
     // 0xa10
     unimplemented, unimplemented, unimplemented, unimplemented,
