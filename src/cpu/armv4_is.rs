@@ -172,6 +172,33 @@ fn op000_and_lshift(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(dst, val);
 }
 
+fn op121_bx(instruction: Instruction, cpu: &mut Cpu) {
+    let rm = instruction.rm();
+
+    if instruction.0 & 0xfff00 != 0xfff00 {
+        // "should be one"
+        panic!("Invalid BX instruction {}", instruction);
+    }
+
+    let target = cpu.reg(rm);
+
+    println!("BX 0x{:08x}", target);
+
+    // If bit 0 of the target is set we switch to Thumb mode
+    let thumb = (target & 1) != 0;
+    let address = target & !1;
+
+    cpu.set_thumb(thumb);
+    cpu.set_pc(address);
+}
+
+fn op1a0_mov_lshift(instruction: Instruction, cpu: &mut Cpu) {
+    let dst = instruction.rd();
+    let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
+
+    cpu.set_reg(dst, val);
+}
+
 fn op24x_sub_i(instruction: Instruction, cpu: &mut Cpu) {
     let dst = instruction.rd();
     let rn  = instruction.rn();
@@ -227,9 +254,9 @@ fn op35x_cmp_i(instruction: Instruction, cpu: &mut Cpu) {
 
 fn op3ax_mov_i(instruction: Instruction, cpu: &mut Cpu) {
     let dst = instruction.rd();
-    let imm = instruction.mode1_imm_no_carry();
+    let val = instruction.mode1_imm_no_carry();
 
-    cpu.set_reg(dst, imm);
+    cpu.set_reg(dst, val);
 }
 
 fn op59x_ldr_pu(instruction: Instruction, cpu: &mut Cpu) {
@@ -242,6 +269,18 @@ fn op59x_ldr_pu(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.load32(addr);
 
     cpu.set_reg(dst, val);
+}
+
+fn op5cx_strb_pu(instruction: Instruction, cpu: &mut Cpu) {
+    let src    = instruction.rd();
+    let base   = instruction.rn();
+    let offset = instruction.mode2_offset_imm();
+
+    let addr = cpu.reg(base).wrapping_add(offset);
+
+    let val = cpu.reg(src);
+
+    cpu.store8(addr, val);
 }
 
 fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
@@ -393,7 +432,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x120
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    unimplemented, op121_bx, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -441,9 +480,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1a0
+    op1a0_mov_lshift, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op1a0_mov_lshift, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1b0
@@ -837,10 +876,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x5c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
+    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
+    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
+    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
 
     // 0x5d0
     unimplemented, unimplemented, unimplemented, unimplemented,
