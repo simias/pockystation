@@ -1,7 +1,7 @@
 use std::fmt;
 use std::mem::swap;
 
-use memory::Interconnect;
+use memory::{Interconnect, Word, Byte};
 
 mod armv4_is;
 
@@ -87,7 +87,7 @@ impl Cpu {
             panic!("Unaligned PC! {:?}", self);
         }
 
-        let instruction = self.inter.read32(pc);
+        let instruction = self.load32(pc);
 
         println!("Executing 0x{:08x}", instruction);
 
@@ -300,7 +300,7 @@ impl Cpu {
 
         println!("load {:08x}", addr);
 
-        self.inter.read32(addr)
+        self.inter.read::<Word>(addr)
     }
 
     fn store32(&mut self, addr: u32, val: u32) {
@@ -310,11 +310,11 @@ impl Cpu {
 
         println!("store32 0x{:08x} @ 0x{:08x}", val, addr);
 
-        self.inter.store32(addr, val);
+        self.inter.store::<Word>(addr, val);
     }
 
     fn store8(&mut self, addr: u32, val: u32) {
-        self.inter.store8(addr, val);
+        self.inter.store::<Byte>(addr, val);
     }
 }
 

@@ -215,7 +215,7 @@ impl Instruction {
     }
 
     fn unimplemented(self, _: &mut Cpu) {
-        panic!("Unimplemented instruction {} ({:03x}",
+        panic!("Unimplemented instruction {} ({:03x})",
                self,
                self.opcode());
     }

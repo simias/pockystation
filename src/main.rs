@@ -1,6 +1,9 @@
 use std::fs::File;
 use std::io::Read;
 
+#[macro_use]
+mod box_array;
+
 mod cpu;
 mod memory;
 
