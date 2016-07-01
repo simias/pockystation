@@ -105,6 +105,42 @@ impl Instruction {
         self.0 & 0xffff
     }
 
+    /// Execute an STM instruction. Returns the address of the last
+    /// store + 4.
+    fn stm(self, cpu: &mut Cpu, start_addr: u32) -> u32 {
+        let rn   = self.rn();
+        let list = self.register_list();
+
+        let first = true;
+
+        let mut addr = start_addr;
+
+        for i in 0..15 {
+            if ((list >> i) & 1) != 0 {
+                let reg = RegisterIndex(i);
+
+                // If Rn is specified in the register_list and it's the
+                // first entry then the original value is stored,
+                // otherwise it's "unpredictable".
+                if !first && reg == rn {
+                    panic!("Unpredictable STM! {}", self);
+                }
+
+                let val = cpu.reg(reg);
+                cpu.store32(addr, val);
+
+                addr = addr.wrapping_add(4);
+            }
+        }
+
+        if ((list >> 15) & 1) != 0 {
+            // Implementation defined
+            panic!("PC stored in STM");
+        }
+
+        addr
+    }
+
     /// Execute this instruction
     fn execute(self, cpu: &mut Cpu) {
         let n = cpu.n();
@@ -153,13 +189,250 @@ impl Instruction {
             };
 
         if cond_true {
-            // Okay, we can execute this instruction.
-            let opcode = self.opcode();
-
-            let handler = OPCODE_LUT[opcode as usize];
-
-            handler(self, cpu);
+            self.decode_and_execute(cpu);
         }
+    }
+
+    fn decode_and_execute(self, cpu: &mut Cpu) {
+        match self.opcode() {
+            0x000 | 0x008 => self.op000_and_lshift(cpu),
+            0x120         => self.op120_msr_cpsr(cpu),
+            0x121         => self.op121_bx(cpu),
+            0x1a0 | 0x1a8 => self.op1a0_mov_lshift(cpu),
+            0x240...0x24f => self.op24x_sub_i(cpu),
+            0x310...0x31f => self.op31x_tst_i(cpu),
+            0x350...0x35f => self.op35x_cmp_i(cpu),
+            0x3a0...0x3af => self.op3ax_mov_i(cpu),
+            0x590...0x59f => self.op59x_ldr_pu(cpu),
+            0x5c0...0x5cf => self.op5cx_strb_pu(cpu),
+            0x8a0...0x8af => self.op8ax_stm_uw(cpu),
+            0x8b0...0x8bf => self.op8bx_ldm_uw(cpu),
+            0x920...0x92f => self.op92x_stm_pw(cpu),
+            0xa00...0xaff => self.opaxx_b(cpu),
+            0xb00...0xbff => self.opbxx_bl(cpu),
+            _             => self.unimplemented(cpu),
+        }
+    }
+
+    fn unimplemented(self, _: &mut Cpu) {
+        panic!("Unimplemented instruction {} ({:03x}",
+               self,
+               self.opcode());
+    }
+
+    fn op000_and_lshift(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let rn  = self.rn();
+        let and = self.mode1_register_lshift_imm_no_carry(cpu);
+
+        let val = cpu.reg(rn) & and;
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op120_msr_cpsr(self, cpu: &mut Cpu) {
+        let rm   = self.rm();
+        let mask = self.msr_field_mask();
+
+        if (self.0 & 0xff00) != 0xf000 {
+            panic!("Invalid MSR instruction {}", self);
+        }
+
+        let val = cpu.reg(rm);
+
+        cpu.msr_cpsr(val, mask);
+    }
+
+    fn op121_bx(self, cpu: &mut Cpu) {
+        let rm = self.rm();
+
+        if (self.0 & 0xfff00) != 0xfff00 {
+            // "should be one"
+            panic!("Invalid BX instruction {}", self);
+        }
+
+        let target = cpu.reg(rm);
+
+        println!("BX 0x{:08x}", target);
+
+        // If bit 0 of the target is set we switch to Thumb mode
+        let thumb = (target & 1) != 0;
+        let address = target & !1;
+
+        cpu.set_thumb(thumb);
+        cpu.set_pc(address);
+    }
+
+    fn op1a0_mov_lshift(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let val = self.mode1_register_lshift_imm_no_carry(cpu);
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op24x_sub_i(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let rn  = self.rn();
+        let b   = self.mode1_imm_no_carry();
+
+        let a = cpu.reg(rn);
+
+        let val = a.wrapping_sub(b);
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op31x_tst_i(self, cpu: &mut Cpu) {
+        let rn       = self.rn();
+        let rd       = self.rd();
+        let (imm, c) = self.mode1_imm(cpu);
+
+        if rd != RegisterIndex(0) {
+            // "should be zero"
+            panic!("TST instruction with non-0 Rd");
+        }
+
+        let val = cpu.reg(rn) & imm;
+
+        cpu.set_n((val as i32) < 0);
+        cpu.set_z(val == 0);
+        cpu.set_c(c);
+    }
+
+    fn op35x_cmp_i(self, cpu: &mut Cpu) {
+        let rn  = self.rn();
+        let rd  = self.rd();
+        let b   = self.mode1_imm_no_carry();
+
+        if rd != RegisterIndex(0) {
+            // "should be zero"
+            panic!("CMP instruction with non-0 Rd");
+        }
+
+        let a = cpu.reg(rn);
+
+        let val = a.wrapping_sub(b);
+
+        let a_neg = (a as i32) < 0;
+        let b_neg = (b as i32) < 0;
+        let v_neg = (val as i32) < 0;
+
+        cpu.set_n(v_neg);
+        cpu.set_z(val == 0);
+        cpu.set_c(a >= b);
+        cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
+    }
+
+    fn op3ax_mov_i(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let val = self.mode1_imm_no_carry();
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op59x_ldr_pu(self, cpu: &mut Cpu) {
+        let dst    = self.rd();
+        let base   = self.rn();
+        let offset = self.mode2_offset_imm();
+
+        let addr = cpu.reg(base).wrapping_add(offset);
+
+        let val = cpu.load32(addr);
+
+        cpu.set_reg_pc_mask(dst, val);
+    }
+
+    fn op5cx_strb_pu(self, cpu: &mut Cpu) {
+        let src    = self.rd();
+        let base   = self.rn();
+        let offset = self.mode2_offset_imm();
+
+        if src.is_pc() {
+            // Implementation defined
+            panic!("PC stored in STRB");
+        }
+
+        let addr = cpu.reg(base).wrapping_add(offset);
+
+        let val = cpu.reg(src);
+
+        cpu.store8(addr, val);
+    }
+
+    fn op8ax_stm_uw(self, cpu: &mut Cpu) {
+        let rn = self.rn();
+
+        if rn.is_pc() {
+            panic!("PC-relative STM!");
+        }
+
+        let start_addr = cpu.reg(rn);
+
+        let end_addr = self.stm(cpu, start_addr);
+
+        cpu.set_reg(rn, end_addr);
+    }
+
+    fn op8bx_ldm_uw(self, cpu: &mut Cpu) {
+        let rn   = self.rn();
+        let list = self.register_list();
+
+        if rn.is_pc() || (list & (1 << rn.0)) != 0 {
+            // Can't load to the base register if we want writeback
+            panic!("Unpredictable LDM");
+        }
+
+        let mut addr = cpu.reg(rn);
+
+        for i in 0..16 {
+            if ((list >> i) & 1) != 0 {
+                let reg = RegisterIndex(i);
+
+                let val = cpu.load32(addr);
+
+                cpu.set_reg_pc_mask(reg, val);
+
+                addr = addr.wrapping_add(4);
+            }
+        }
+
+        cpu.set_reg(rn, addr);
+    }
+
+    fn op92x_stm_pw(self, cpu: &mut Cpu) {
+        let rn   = self.rn();
+        let list = self.register_list();
+
+        if rn.is_pc() {
+            // Using PC as base if we want writeback is unpredictable
+            panic!("PC-relative STM!");
+        }
+
+        let num_regs = list.count_ones();
+
+        let start_addr = cpu.reg(rn).wrapping_sub(4 * num_regs);
+
+        cpu.set_reg(rn, start_addr);
+    }
+
+    fn opaxx_b(self, cpu: &mut Cpu) {
+        let offset = self.branch_imm_offset();
+
+        let pc = cpu.registers[15].wrapping_add(offset);
+
+        cpu.set_pc(pc);
+    }
+
+    fn opbxx_bl(self, cpu: &mut Cpu) {
+        let offset = self.branch_imm_offset();
+
+        let pc = cpu.registers[15].wrapping_add(offset);
+
+        let ra = cpu.next_pc;
+
+        cpu.set_reg(RegisterIndex(14), ra);
+
+        cpu.set_pc(pc);
     }
 }
 
@@ -168,1816 +441,3 @@ impl fmt::Display for Instruction {
         write!(f, "0x{:08x}", self.0)
     }
 }
-
-fn unimplemented(instruction: Instruction, _: &mut Cpu) {
-    panic!("unimplemented instruction {} ({:03x}",
-           instruction,
-           instruction.opcode());
-}
-
-fn op000_and_lshift(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn  = instruction.rn();
-    let and = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    let val = cpu.reg(rn) & and;
-
-    cpu.set_reg(dst, val);
-}
-
-fn op120_msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
-    let rm   = instruction.rm();
-    let mask = instruction.msr_field_mask();
-
-    if instruction.0 & 0xff00 != 0xf000 {
-        panic!("Invalid MSR instruction {}", instruction);
-    }
-
-    let val = cpu.reg(rm);
-
-    cpu.msr_cpsr(val, mask);
-}
-
-fn op121_bx(instruction: Instruction, cpu: &mut Cpu) {
-    let rm = instruction.rm();
-
-    if instruction.0 & 0xfff00 != 0xfff00 {
-        // "should be one"
-        panic!("Invalid BX instruction {}", instruction);
-    }
-
-    let target = cpu.reg(rm);
-
-    println!("BX 0x{:08x}", target);
-
-    // If bit 0 of the target is set we switch to Thumb mode
-    let thumb = (target & 1) != 0;
-    let address = target & !1;
-
-    cpu.set_thumb(thumb);
-    cpu.set_pc(address);
-}
-
-fn op1a0_mov_lshift(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    cpu.set_reg(dst, val);
-}
-
-fn op24x_sub_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a.wrapping_sub(b);
-
-    cpu.set_reg(dst, val);
-}
-
-fn op31x_tst_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rn       = instruction.rn();
-    let rd       = instruction.rd();
-    let (imm, c) = instruction.mode1_imm(cpu);
-
-    if rd != RegisterIndex(0) {
-        // "should be zero"
-        panic!("TST instruction with non-0 Rd");
-    }
-
-    let val = cpu.reg(rn) & imm;
-
-    cpu.set_n((val as i32) < 0);
-    cpu.set_z(val == 0);
-    cpu.set_c(c);
-}
-
-fn op35x_cmp_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rn  = instruction.rn();
-    let rd  = instruction.rd();
-    let b   = instruction.mode1_imm_no_carry();
-
-    if rd != RegisterIndex(0) {
-        // "should be zero"
-        panic!("CMP instruction with non-0 Rd");
-    }
-
-    let a = cpu.reg(rn);
-
-    let val = a.wrapping_sub(b);
-
-    let a_neg = (a as i32) < 0;
-    let b_neg = (b as i32) < 0;
-    let v_neg = (val as i32) < 0;
-
-    cpu.set_n(v_neg);
-    cpu.set_z(val == 0);
-    cpu.set_c(a >= b);
-    cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
-}
-
-fn op3ax_mov_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let val = instruction.mode1_imm_no_carry();
-
-    cpu.set_reg(dst, val);
-}
-
-fn op59x_ldr_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let dst    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = cpu.load32(addr);
-
-    cpu.set_reg_pc_mask(dst, val);
-}
-
-fn op5cx_strb_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let src    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    if src.is_pc() {
-        // Implementation defined
-        panic!("PC stored in STRB");
-    }
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = cpu.reg(src);
-
-    cpu.store8(addr, val);
-}
-
-fn op8ax_stm_uw(instruction: Instruction, cpu: &mut Cpu) {
-
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc() {
-        // Can't load to the base register if we want writeback
-        panic!("Unpredictable STM");
-    }
-
-    let mut addr = cpu.reg(rn);
-
-    let first = true;
-
-    for i in 0..15 {
-        if ((list >> i) & 1) != 0 {
-            let reg = RegisterIndex(i);
-
-            // If Rn is specified in the register_list and it's the
-            // first entry then the original value is stored,
-            // otherwise it's "unpredictable".
-            if !first && reg == rn {
-                panic!("Unpredictable STMDB!");
-            }
-
-            let val = cpu.reg(reg);
-            cpu.store32(addr, val);
-
-            addr = addr.wrapping_add(4);
-        }
-    }
-
-    if ((list >> 15) & 1) != 0 {
-        // Implementation defined
-        panic!("PC stored in STM");
-    }
-
-    cpu.set_reg(rn, addr);
-}
-
-fn op8bx_ldm_uw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc() || (list & (1 << rn.0)) != 0 {
-        // Can't load to the base register if we want writeback
-        panic!("Unpredictable LDM");
-    }
-
-    let mut addr = cpu.reg(rn);
-
-    for i in 0..16 {
-        if ((list >> i) & 1) != 0 {
-            let reg = RegisterIndex(i);
-
-            let val = cpu.load32(addr);
-
-            cpu.set_reg_pc_mask(reg, val);
-
-            addr = addr.wrapping_add(4);
-        }
-    }
-
-    cpu.set_reg(rn, addr);
-}
-
-fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc() {
-        // "unpredictable"
-        panic!("PC-relative STM");
-    }
-
-    let num_regs = list.count_ones();
-
-    let start_addr = cpu.reg(rn).wrapping_sub(4 * num_regs);
-
-    let mut addr = start_addr;
-
-    let first = true;
-
-    for i in 0..15 {
-        if ((list >> i) & 1) != 0 {
-            let reg = RegisterIndex(i);
-
-            // If Rn is specified in the register_list and it's the
-            // first entry then the original value is stored,
-            // otherwise it's "unpredictable".
-            if !first && reg == rn {
-                panic!("Unpredictable STMDB!");
-            }
-
-            let val = cpu.reg(reg);
-            cpu.store32(addr, val);
-
-            addr = addr.wrapping_add(4);
-        }
-    }
-
-    if ((list >> 15) & 1) != 0 {
-        // Implementation defined
-        panic!("PC stored in STM");
-    }
-
-    cpu.set_reg(rn, start_addr);
-}
-
-fn opaxx_b(instruction: Instruction, cpu: &mut Cpu) {
-    let offset = instruction.branch_imm_offset();
-
-    let pc = cpu.registers[15].wrapping_add(offset);
-
-    cpu.set_pc(pc);
-}
-
-fn opbxx_bl(instruction: Instruction, cpu: &mut Cpu) {
-    let offset = instruction.branch_imm_offset();
-
-    let pc = cpu.registers[15].wrapping_add(offset);
-
-    let ra = cpu.next_pc;
-
-    cpu.set_reg(RegisterIndex(14), ra);
-
-    cpu.set_pc(pc);
-}
-
-/// 4096-entry LUT used to decode the instruction
-static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
-    // 0x000
-    op000_and_lshift, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    op000_and_lshift, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x010
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x020
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x030
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x040
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x050
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x060
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x070
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x080
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x090
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x0a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x0b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x0c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x0d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x0e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x0f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x100
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x110
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x120
-    op120_msr_cpsr, op121_bx, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x130
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x140
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x150
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x160
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x170
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x180
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x190
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x1a0
-    op1a0_mov_lshift, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    op1a0_mov_lshift, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x1b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x1c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x1d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x1e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x1f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x200
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x210
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x220
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x230
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x240
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-
-    // 0x250
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x260
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x270
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x280
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x290
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x2a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x2b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x2c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x2d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x2e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x2f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x300
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x310
-    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
-    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
-    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
-    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
-
-    // 0x320
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x330
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x340
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x350
-    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
-    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
-    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
-    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
-
-    // 0x360
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x370
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x380
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x390
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x3a0
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-
-    // 0x3b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x3c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x3d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x3e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x3f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x400
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x410
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x420
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x430
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x440
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x450
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x460
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x470
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x480
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x490
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x4a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x4b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x4c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x4d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x4e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x4f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x500
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x510
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x520
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x530
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x540
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x550
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x560
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x570
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x580
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x590
-    op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu,
-    op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu,
-    op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu,
-    op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu,
-
-    // 0x5a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x5b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x5c0
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-
-    // 0x5d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x5e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x5f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x600
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x610
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x620
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x630
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x640
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x650
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x660
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x670
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x680
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x690
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x6a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x6b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x6c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x6d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x6e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x6f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x700
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x710
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x720
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x730
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x740
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x750
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x760
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x770
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x780
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x790
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x7a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x7b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x7c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x7d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x7e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x7f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x800
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x810
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x820
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x830
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x840
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x850
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x860
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x870
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x880
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x890
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x8a0
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-
-    // 0x8b0
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-
-    // 0x8c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x8d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x8e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x8f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x900
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x910
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x920
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-
-    // 0x930
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x940
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x950
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x960
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x970
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x980
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x990
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x9a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x9b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x9c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x9d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x9e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0x9f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xa00
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xa10
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xa20
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xa30
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xa40
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xa50
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xa60
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xa70
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xa80
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xa90
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xaa0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xab0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xac0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xad0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xae0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xaf0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-
-    // 0xb00
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xb10
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xb20
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xb30
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xb40
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xb50
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xb60
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xb70
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xb80
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xb90
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xba0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xbb0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xbc0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xbd0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xbe0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xbf0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-
-    // 0xc00
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xc10
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xc20
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xc30
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xc40
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xc50
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xc60
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xc70
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xc80
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xc90
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xca0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xcb0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xcc0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xcd0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xce0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xcf0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd00
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd10
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd20
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd30
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd40
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd50
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd60
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd70
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd80
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xd90
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xda0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xdb0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xdc0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xdd0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xde0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xdf0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe00
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe10
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe20
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe30
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe40
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe50
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe60
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe70
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe80
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xe90
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xea0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xeb0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xec0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xed0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xee0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xef0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf00
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf10
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf20
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf30
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf40
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf50
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf60
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf70
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf80
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xf90
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xfa0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xfb0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xfc0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xfd0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xfe0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-
-    // 0xff0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-];
