@@ -423,10 +423,22 @@ fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rn, start_addr);
 }
 
-fn opa0x_b(instruction: Instruction, cpu: &mut Cpu) {
+fn opaxx_b(instruction: Instruction, cpu: &mut Cpu) {
     let offset = instruction.branch_imm_offset();
 
     let pc = cpu.registers[15].wrapping_add(offset);
+
+    cpu.set_pc(pc);
+}
+
+fn opbxx_bl(instruction: Instruction, cpu: &mut Cpu) {
+    let offset = instruction.branch_imm_offset();
+
+    let pc = cpu.registers[15].wrapping_add(offset);
+
+    let ra = cpu.next_pc;
+
+    cpu.set_reg(RegisterIndex(14), ra);
 
     cpu.set_pc(pc);
 }
@@ -1394,196 +1406,196 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0xa00
-    opa0x_b, opa0x_b, opa0x_b, opa0x_b,
-    opa0x_b, opa0x_b, opa0x_b, opa0x_b,
-    opa0x_b, opa0x_b, opa0x_b, opa0x_b,
-    opa0x_b, opa0x_b, opa0x_b, opa0x_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xa10
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xa20
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xa30
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xa40
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xa50
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xa60
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xa70
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xa80
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xa90
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xaa0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xab0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xac0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xad0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xae0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xaf0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
 
     // 0xb00
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xb10
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xb20
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xb30
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xb40
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xb50
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xb60
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xb70
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xb80
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xb90
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xba0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xbb0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xbc0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xbd0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xbe0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xbf0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
 
     // 0xc00
     unimplemented, unimplemented, unimplemented, unimplemented,
