@@ -81,6 +81,12 @@ impl Cpu {
         let pc = self.next_pc;
 
         self.next_pc = self.registers[15];
+
+        // the PC register (r15) always points to the current
+        // instruction's addres + 8, except for STR/STM instructions
+        // that store R15 where it's implementation whether it's +8 or
+        // +12. I need to check which it is for the ARM7TDMI used in
+        // the PocketStation.
         self.registers[15] += 4;
 
         if pc & 3 != 0 {
@@ -320,7 +326,7 @@ impl Cpu {
 
 impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(writeln!(f, "PC:  0x{:08x}  Mode: {:?}", self.next_pc, self.mode));
+        try!(writeln!(f, "IP:  0x{:08x}  Mode: {:?}", self.next_pc, self.mode));
 
         let flag = |f, l| if f { l } else { '-' };
 
@@ -342,7 +348,7 @@ impl fmt::Debug for Cpu {
             }
         }
 
-        for i in 10..15 {
+        for i in 10..16 {
             try!(write!(f, "R{}: 0x{:08x}", i, self.registers[i]));
 
             if i % 2 == 0 {

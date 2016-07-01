@@ -24,13 +24,15 @@ impl Interconnect {
     }
 
     pub fn read<A: Addressable>(&self, addr: u32) -> u32 {
+        let region = addr >> 24;
+        let offset = addr & 0xffffff;
 
         if (addr & (A::size() as u32 - 1)) != 0 {
             panic!("Missaligned {}bit read at 0x{:08x}", A::size() * 8, addr);
         }
 
-        let region = addr >> 24;
-        let offset = addr & 0xffffff;
+        let unimplemented =
+            || panic!("unhandled load address 0x{:08x}", addr);
 
         match region {
             0x00 =>
@@ -46,9 +48,15 @@ impl Interconnect {
                     0 => 0,
                     // INT_MASK
                     8 => 0,
-                    _ => panic!("Unsupported register 0x{:8x}", addr),
+                    _ => unimplemented(),
                 },
-            _ => panic!("unhandled load address 0x{:08x}", addr),
+            0x0b =>
+                match offset {
+                    // CLK MODE: reply that the clock is ready (locked?)
+                    0 => 0x10,
+                    _ => unimplemented(),
+                },
+            _ => unimplemented(),
         }
     }
 
@@ -61,6 +69,9 @@ impl Interconnect {
                    A::size() * 8, addr);
         }
 
+        let unimplemented =
+            || panic!("unhandled store address 0x{:08x}", addr);
+
         match region {
             0x00 =>
                 if !self.kernel_at_0 {
@@ -68,12 +79,51 @@ impl Interconnect {
                 },
             0x06 =>
                 match offset {
-                    // F_CTRL
-                    0 => self.set_f_ctrl::<A>(val),
-                    _ => panic!("unhandled store address 0x{:08x}", addr),
+                    0x00 => self.set_f_ctrl::<A>(val),
+                    0x08 => println!("F BANK FLG 0x{:08x}", val),
+                    0x0c => println!("F_WAIT1 0x{:08x}", val),
+                    0x10 => println!("F_WAIT2 0x{:08x}", val),
+                    _ => unimplemented(),
                 },
-            _ => panic!("unhandled store address 0x{:08x}", addr),
-        }
+            0x0a =>
+                match offset {
+                    0xc => println!("INT MASK CLR 0x{:08x}", val),
+                    0x800000 => println!("T0 RELOAD 0x{:08x}", val),
+                    0x800008 => println!("T0 MODE 0x{:08x}", val),
+                    0x800010 => println!("T1 RELOAD 0x{:08x}", val),
+                    0x800018 => println!("T1 MODE 0x{:08x}", val),
+                    0x800020 => println!("T2 RELOAD 0x{:08x}", val),
+                    0x800028 => println!("T1 MODE 0x{:08x}", val),
+                    _ => unimplemented(),
+                },
+            0x0b =>
+                match offset {
+                    0 => println!("CLK MODE 0x{:08x}", val),
+                    0x800000 => println!("RTC MODE 0x{:08x}", val),
+                    _ => unimplemented(),
+                },
+            0x0c =>
+                match offset {
+                    0x00 => println!("COM MODE 0x{:08x}", val),
+                    0x08 => println!("COM DATA 0x{:08x}", val),
+                    0x10 => println!("COM CTRL1 0x{:08x}", val),
+                    0x18 => println!("COM CTRL2 0x{:08x}", val),
+                    0x800000 => println!("IRDA MODE 0x{:08x}", val),
+                    0x800004 => println!("IRDA DATA 0x{:08x}", val),
+                    _ => unimplemented(),
+                },
+            0x0d =>
+                match offset {
+                    0x800000 => println!("IOP CTRL 0x{:08x}", val),
+                    0x800004 => println!("IOP STOP 0x{:08x}", val),
+                    0x800008 => println!("IOP START 0x{:08x}", val),
+                    0x800010 => println!("DAC CTRL 0x{:08x}", val),
+                    0x800014 => println!("DAC DATA 0x{:08x}", val),
+                    0x800020 => println!("BATT CTRL 0x{:08x}", val),
+                    _ => unimplemented(),
+                },
+            _ => unimplemented(),
+            }
     }
 
     fn read_kernel<A: Addressable>(&self, offset: u32) -> u32 {
@@ -97,13 +147,12 @@ impl Interconnect {
     }
 
     fn set_f_ctrl<A: Addressable>(&mut self, val: u32) {
-        if A::size() != 1 {
-            panic!("Unimplemented F_CTRL access");
-        }
-
-        match val {
-            0x03 => self.kernel_at_0 = false,
-            _ => panic!("unhandled F_CTRL 0x{:02x}", val),
+        if A::size() == 1 && val == 0x03 {
+            self.kernel_at_0 = false;
+        } else if A::size() == 4 {
+            println!("F CTRL 0x{:08x}", val);
+        } else {
+            panic!("unhandled F_CTRL 0x{:02x}", val);
         }
     }
 }

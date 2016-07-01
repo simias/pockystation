@@ -203,6 +203,7 @@ impl Instruction {
             0x310...0x31f => self.op31x_tst_i(cpu),
             0x350...0x35f => self.op35x_cmp_i(cpu),
             0x3a0...0x3af => self.op3ax_mov_i(cpu),
+            0x580...0x58f => self.op58x_str_pu(cpu),
             0x590...0x59f => self.op59x_ldr_pu(cpu),
             0x5c0...0x5cf => self.op5cx_strb_pu(cpu),
             0x8a0...0x8af => self.op8ax_stm_uw(cpu),
@@ -330,6 +331,23 @@ impl Instruction {
         cpu.set_reg(dst, val);
     }
 
+    fn op58x_str_pu(self, cpu: &mut Cpu) {
+        let src    = self.rd();
+        let base   = self.rn();
+        let offset = self.mode2_offset_imm();
+
+        if src.is_pc() {
+            // Implementation defined
+            panic!("PC stored in STR");
+        }
+
+        let addr = cpu.reg(base).wrapping_add(offset);
+
+        let val = cpu.reg(src);
+
+        cpu.store32(addr, val);
+    }
+
     fn op59x_ldr_pu(self, cpu: &mut Cpu) {
         let dst    = self.rd();
         let base   = self.rn();
@@ -348,7 +366,8 @@ impl Instruction {
         let offset = self.mode2_offset_imm();
 
         if src.is_pc() {
-            // Implementation defined
+            // Unpredictable (not "implementation defined" like STR
+            // for some reason)
             panic!("PC stored in STRB");
         }
 
