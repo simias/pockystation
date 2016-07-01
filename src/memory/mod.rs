@@ -68,4 +68,19 @@ impl Interconnect {
             _ => panic!("unhandled store address 0x{:08x}", addr),
         }
     }
+
+    pub fn store32(&mut self, addr: u32, _val: u32) {
+        let region = addr >> 24;
+        let _offset = (addr & 0xffffff) as usize;
+
+        match region {
+            0x00 =>
+                if self.kernel_at_0 {
+                    panic!("Kernel write");
+                } else {
+                    ()//panic!("Ram write");
+                },
+            _ => panic!("unhandled store address 0x{:08x}", addr),
+        }
+    }
 }

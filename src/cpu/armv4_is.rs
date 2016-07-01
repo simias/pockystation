@@ -294,7 +294,7 @@ fn op59x_ldr_pu(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.load32(addr);
 
-    cpu.set_reg(dst, val);
+    cpu.set_reg_pc_mask(dst, val);
 }
 
 fn op5cx_strb_pu(instruction: Instruction, cpu: &mut Cpu) {
@@ -302,11 +302,82 @@ fn op5cx_strb_pu(instruction: Instruction, cpu: &mut Cpu) {
     let base   = instruction.rn();
     let offset = instruction.mode2_offset_imm();
 
+    if src.is_pc() {
+        // Implementation defined
+        panic!("PC stored in STRB");
+    }
+
     let addr = cpu.reg(base).wrapping_add(offset);
 
     let val = cpu.reg(src);
 
     cpu.store8(addr, val);
+}
+
+fn op8ax_stm_uw(instruction: Instruction, cpu: &mut Cpu) {
+
+    let rn   = instruction.rn();
+    let list = instruction.register_list();
+
+    if rn.is_pc() {
+        // Can't load to the base register if we want writeback
+        panic!("Unpredictable STM");
+    }
+
+    let mut addr = cpu.reg(rn);
+
+    let first = true;
+
+    for i in 0..15 {
+        if ((list >> i) & 1) != 0 {
+            let reg = RegisterIndex(i);
+
+            // If Rn is specified in the register_list and it's the
+            // first entry then the original value is stored,
+            // otherwise it's "unpredictable".
+            if !first && reg == rn {
+                panic!("Unpredictable STMDB!");
+            }
+
+            let val = cpu.reg(reg);
+            cpu.store32(addr, val);
+
+            addr = addr.wrapping_add(4);
+        }
+    }
+
+    if ((list >> 15) & 1) != 0 {
+        // Implementation defined
+        panic!("PC stored in STM");
+    }
+
+    cpu.set_reg(rn, addr);
+}
+
+fn op8bx_ldm_uw(instruction: Instruction, cpu: &mut Cpu) {
+    let rn   = instruction.rn();
+    let list = instruction.register_list();
+
+    if rn.is_pc() || (list & (1 << rn.0)) != 0 {
+        // Can't load to the base register if we want writeback
+        panic!("Unpredictable LDM");
+    }
+
+    let mut addr = cpu.reg(rn);
+
+    for i in 0..16 {
+        if ((list >> i) & 1) != 0 {
+            let reg = RegisterIndex(i);
+
+            let val = cpu.load32(addr);
+
+            cpu.set_reg_pc_mask(reg, val);
+
+            addr = addr.wrapping_add(4);
+        }
+    }
+
+    cpu.set_reg(rn, addr);
 }
 
 fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
@@ -326,7 +397,7 @@ fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
 
     let first = true;
 
-    for i in 0..16 {
+    for i in 0..15 {
         if ((list >> i) & 1) != 0 {
             let reg = RegisterIndex(i);
 
@@ -342,6 +413,11 @@ fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
 
             addr = addr.wrapping_add(4);
         }
+    }
+
+    if ((list >> 15) & 1) != 0 {
+        // Implementation defined
+        panic!("PC stored in STM");
     }
 
     cpu.set_reg(rn, start_addr);
@@ -1186,16 +1262,16 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x8a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
+    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
+    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
+    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
 
     // 0x8b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
+    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
+    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
+    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
 
     // 0x8c0
     unimplemented, unimplemented, unimplemented, unimplemented,

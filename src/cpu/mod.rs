@@ -137,9 +137,20 @@ impl Cpu {
     }
 
     fn set_reg(&mut self, r: RegisterIndex, v: u32) {
-
         if r.is_pc() {
             self.set_pc(v);
+        } else {
+            self.registers[r.0 as usize] = v;
+        }
+    }
+
+    // Some ARM opcodes write to the PC and we're supposed to ignore
+    // the two LSB (effectively word-aligning the PC no matter
+    // what). Some other opcodes aren't documented in the manual as
+    // doing that so I use `set_reg` directly for those.
+    fn set_reg_pc_mask(&mut self, r: RegisterIndex, v: u32) {
+        if r.is_pc() {
+            self.set_pc(v & !3);
         } else {
             self.registers[r.0 as usize] = v;
         }
@@ -297,7 +308,9 @@ impl Cpu {
             panic!("Unaligned store32! 0x{:08x} {:?}", addr, self);
         }
 
-        panic!("store32 0x{:08x} @ 0x{:08x}", val, addr);
+        println!("store32 0x{:08x} @ 0x{:08x}", val, addr);
+
+        self.inter.store32(addr, val);
     }
 
     fn store8(&mut self, addr: u32, val: u32) {
