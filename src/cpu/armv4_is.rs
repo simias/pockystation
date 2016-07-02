@@ -71,11 +71,11 @@ impl Instruction {
         imm.rotate_right(rot)
     }
 
-    /// Addressing mode 1: Logicat shift left my immediate. Used when
+    /// Addressing mode 1: Logicat shift left by immediate. Used when
     /// shifter carry is not needed.
     fn mode1_register_lshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
         let shift = (self.0 >> 7) & 0x1f;
-        let rm = self.rm();
+        let rm    = self.rm();
 
         let val = cpu.reg(rm);
 
@@ -85,6 +85,16 @@ impl Instruction {
     /// Addressing mode 2: immediate offset
     fn mode2_offset_imm(self) -> u32 {
         self.0 & 0xfff
+    }
+
+    /// Addressing mode 2: Logical shift left by immediate
+    fn mode2_register_lshift(self, cpu: &Cpu) -> u32 {
+        let shift = (self.0 >> 7) & 0x1f;
+        let rm    = self.rm();
+
+        let val = cpu.reg(rm);
+
+        val << shift
     }
 
     fn branch_imm_offset(self) -> u32 {
@@ -198,14 +208,19 @@ impl Instruction {
             0x000 | 0x008 => self.op000_and_lshift(cpu),
             0x120         => self.op120_msr_cpsr(cpu),
             0x121         => self.op121_bx(cpu),
+            0x150 | 0x158 => self.op150_cmp_lshift(cpu),
             0x1a0 | 0x1a8 => self.op1a0_mov_lshift(cpu),
+            0x200...0x20f => self.op20x_and_i(cpu),
             0x240...0x24f => self.op24x_sub_i(cpu),
+            0x280...0x28f => self.op28x_add_i(cpu),
             0x310...0x31f => self.op31x_tst_i(cpu),
             0x350...0x35f => self.op35x_cmp_i(cpu),
             0x3a0...0x3af => self.op3ax_mov_i(cpu),
+            0x480...0x48f => self.op48x_str_u(cpu),
             0x580...0x58f => self.op58x_str_pu(cpu),
             0x590...0x59f => self.op59x_ldr_pu(cpu),
             0x5c0...0x5cf => self.op5cx_strb_pu(cpu),
+            0x780 | 0x788 => self.op780_str_ipu(cpu),
             0x8a0...0x8af => self.op8ax_stm_uw(cpu),
             0x8b0...0x8bf => self.op8bx_ldm_uw(cpu),
             0x920...0x92f => self.op92x_stm_pw(cpu),
@@ -264,9 +279,45 @@ impl Instruction {
         cpu.set_pc(address);
     }
 
+    fn op150_cmp_lshift(self, cpu: &mut Cpu) {
+        let rn  = self.rn();
+        let rd  = self.rd();
+        let b   = self.mode1_register_lshift_imm_no_carry(cpu);
+
+        if rd != RegisterIndex(0) {
+            // "should be zero"
+            panic!("CMP instruction with non-0 Rd");
+        }
+
+        let a = cpu.reg(rn);
+
+        let val = a.wrapping_sub(b);
+
+        let a_neg = (a as i32) < 0;
+        let b_neg = (b as i32) < 0;
+        let v_neg = (val as i32) < 0;
+
+        cpu.set_n(v_neg);
+        cpu.set_z(val == 0);
+        cpu.set_c(a >= b);
+        cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
+    }
+
     fn op1a0_mov_lshift(self, cpu: &mut Cpu) {
         let dst = self.rd();
         let val = self.mode1_register_lshift_imm_no_carry(cpu);
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op20x_and_i(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let rn  = self.rn();
+        let b   = self.mode1_imm_no_carry();
+
+        let a = cpu.reg(rn);
+
+        let val = a & b;
 
         cpu.set_reg(dst, val);
     }
@@ -279,6 +330,18 @@ impl Instruction {
         let a = cpu.reg(rn);
 
         let val = a.wrapping_sub(b);
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op28x_add_i(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let rn  = self.rn();
+        let b   = self.mode1_imm_no_carry();
+
+        let a = cpu.reg(rn);
+
+        let val = a.wrapping_add(b);
 
         cpu.set_reg(dst, val);
     }
@@ -331,6 +394,32 @@ impl Instruction {
         cpu.set_reg(dst, val);
     }
 
+    fn op48x_str_u(self, cpu: &mut Cpu) {
+        let src    = self.rd();
+        let base   = self.rn();
+        let offset = self.mode2_offset_imm();
+
+        if src.is_pc() {
+            // Implementation defined
+            panic!("PC stored in STR");
+        }
+
+        if base.is_pc() {
+            // Unpredictable
+            panic!("PC post-indexed");
+        }
+
+        let addr = cpu.reg(base);
+
+        let val = cpu.reg(src);
+
+        cpu.store32(addr, val);
+
+        let post_addr = addr.wrapping_add(offset);
+
+        cpu.set_reg(base, post_addr)
+    }
+
     fn op58x_str_pu(self, cpu: &mut Cpu) {
         let src    = self.rd();
         let base   = self.rn();
@@ -376,6 +465,23 @@ impl Instruction {
         let val = cpu.reg(src);
 
         cpu.store8(addr, val);
+    }
+
+    fn op780_str_ipu(self, cpu: &mut Cpu) {
+        let src    = self.rd();
+        let base   = self.rn();
+        let offset = self.mode2_register_lshift(cpu);
+
+        if src.is_pc() {
+            // Implementation defined
+            panic!("PC stored in STR");
+        }
+
+        let addr = cpu.reg(base).wrapping_add(offset);
+
+        let val = cpu.reg(src);
+
+        cpu.store32(addr, val);
     }
 
     fn op8ax_stm_uw(self, cpu: &mut Cpu) {
@@ -430,6 +536,8 @@ impl Instruction {
         let num_regs = list.count_ones();
 
         let start_addr = cpu.reg(rn).wrapping_sub(4 * num_regs);
+
+        self.stm(cpu, start_addr);
 
         cpu.set_reg(rn, start_addr);
     }

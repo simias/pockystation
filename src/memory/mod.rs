@@ -42,6 +42,12 @@ impl Interconnect {
                     panic!("Ram access");
                 },
             0x04 => self.read_kernel::<A>(offset),
+            0x06 =>
+                match offset {
+                    // F_CAL. Need to dump a value from a real PocketStation.
+                    0x308 => 0xca1,
+                    _ => unimplemented(),
+                },
             0x0a =>
                 match offset {
                     // INT_LATCH
@@ -83,11 +89,18 @@ impl Interconnect {
                     0x08 => println!("F BANK FLG 0x{:08x}", val),
                     0x0c => println!("F_WAIT1 0x{:08x}", val),
                     0x10 => println!("F_WAIT2 0x{:08x}", val),
+                    0x100...0x13c => {
+                        let bank = (offset & 0x3f) / 4;
+
+                        println!("F BANK VAL{} 0x{:08x}", bank, val);
+                    }
                     _ => unimplemented(),
                 },
             0x0a =>
                 match offset {
-                    0xc => println!("INT MASK CLR 0x{:08x}", val),
+                    0x0c => println!("INT MASK CLR 0x{:08x}", val),
+                    0x08 => println!("INT MASK SET 0x{:08x}", val),
+                    0x10 => println!("INT ACK 0x{:08x}", val),
                     0x800000 => println!("T0 RELOAD 0x{:08x}", val),
                     0x800008 => println!("T0 MODE 0x{:08x}", val),
                     0x800010 => println!("T1 RELOAD 0x{:08x}", val),
@@ -114,6 +127,13 @@ impl Interconnect {
                 },
             0x0d =>
                 match offset {
+                    0x0 => println!("LCD MODE 0x{:08x}", val),
+                    0x4 => println!("LCD CAL 0x{:08x}", val),
+                    0x100...0x17c => {
+                        let row = (offset & 0x7f) / 4;
+
+                        println!("LCD VRAM{} 0x{:08x}", row, val);
+                    },
                     0x800000 => println!("IOP CTRL 0x{:08x}", val),
                     0x800004 => println!("IOP STOP 0x{:08x}", val),
                     0x800008 => println!("IOP START 0x{:08x}", val),
