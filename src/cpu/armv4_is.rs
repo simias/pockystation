@@ -53,7 +53,7 @@ impl Instruction {
 
             let imm = imm.rotate_right(rot);
 
-            let carry_out = (imm >> 31) & 1 == 1;
+            let carry_out = (imm as i32) < 0;
 
             (imm, carry_out)
         }

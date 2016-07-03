@@ -59,6 +59,8 @@ impl Interconnect {
                 match offset {
                     // INT_LATCH
                     0 => 0,
+                    // INT_INPUT
+                    4 => 0,
                     // INT_MASK
                     8 => 0,
                     _ => unimplemented(),
