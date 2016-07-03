@@ -93,8 +93,11 @@ impl Instruction {
             0x1a0...0x1bf => self.op1ax_ldr_ri5(cpu),
             0x2d0...0x2d3 => self.op2d0_push(cpu),
             0x2d4...0x2d7 => self.op2d4_push_lr(cpu),
+            0x2f0...0x2f3 => self.op2f0_pop(cpu),
+            0x2f4...0x2f7 => self.op2f4_pop_pc(cpu),
             0x340...0x343 => self.op340_beq(cpu),
             0x344...0x347 => self.op344_bne(cpu),
+            0x380...0x39f => self.op38x_b(cpu),
             0x3c0...0x3df => self.op3cx_bl_hi(cpu),
             0x3e0...0x3ff => self.op3ex_bl_lo(cpu),
             _ => self.unimplemented(cpu),
@@ -346,6 +349,63 @@ impl Instruction {
         cpu.set_reg(sp, start_addr);
     }
 
+    fn op2f0_pop(self, cpu: &mut Cpu) {
+        let list = self.register_list();
+
+        // Pop are SP-relative
+        let sp = RegisterIndex(13);
+
+        let num_regs = list.count_ones();
+
+        if num_regs == 0 {
+            panic!("Unpredictable PUSH {}", self);
+        }
+
+        let mut addr = cpu.reg(sp);
+
+        for i in 0..8 {
+            if ((list >> i) & 1) != 0 {
+                let reg = RegisterIndex(i);
+
+                let val = cpu.load32(addr);
+
+                cpu.set_reg(reg, val);
+
+                addr = addr.wrapping_add(4);
+            }
+        }
+
+        cpu.set_reg(sp, addr);
+    }
+
+    fn op2f4_pop_pc(self, cpu: &mut Cpu) {
+        let list = self.register_list();
+
+        // Pop are SP-relative
+        let sp = RegisterIndex(13);
+
+        let mut addr = cpu.reg(sp);
+
+        for i in 0..8 {
+            if ((list >> i) & 1) != 0 {
+                let reg = RegisterIndex(i);
+
+                let val = cpu.load32(addr);
+
+                cpu.set_reg(reg, val);
+
+                addr = addr.wrapping_add(4);
+            }
+        }
+
+        // Load PC
+        let pc = cpu.load32(addr);
+        cpu.set_pc(pc & !1);
+        addr = addr.wrapping_add(4);
+
+        cpu.set_reg(sp, addr);
+    }
+
     fn op340_beq(self, cpu: &mut Cpu) {
         let offset = self.signed_imm8() << 1;
 
@@ -364,6 +424,14 @@ impl Instruction {
 
             cpu.set_pc(pc);
         }
+    }
+
+    fn op38x_b(self, cpu: &mut Cpu) {
+        let offset = self.signed_imm11() << 1;
+
+        let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
+
+        cpu.set_pc(pc);
     }
 
     fn op1ax_ldr_ri5(self, cpu: &mut Cpu) {
