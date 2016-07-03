@@ -1,4 +1,5 @@
 use dac::Dac;
+use irda::Irda;
 
 pub struct Interconnect {
     kernel: Box<[u8; KERNEL_SIZE]>,
@@ -7,6 +8,7 @@ pub struct Interconnect {
     /// that the reset vector starts executing from the kernel.
     kernel_at_0: bool,
     dac: Dac,
+    irda: Irda,
 }
 
 impl Interconnect {
@@ -24,6 +26,7 @@ impl Interconnect {
             ram: box_array![0xca; RAM_SIZE],
             kernel_at_0: true,
             dac: Dac::new(),
+            irda: Irda::new(),
         }
     }
 
@@ -64,6 +67,12 @@ impl Interconnect {
                 match offset {
                     // CLK MODE: reply that the clock is ready (locked?)
                     0 => 0x10,
+                    _ => unimplemented(),
+                },
+            0x0c =>
+                match offset {
+                    0x800000 => self.irda.load::<A>(0),
+                    0x800004 => self.irda.load::<A>(4),
                     _ => unimplemented(),
                 },
             0x0d =>
@@ -131,8 +140,8 @@ impl Interconnect {
                     0x08 => println!("COM DATA 0x{:08x}", val),
                     0x10 => println!("COM CTRL1 0x{:08x}", val),
                     0x18 => println!("COM CTRL2 0x{:08x}", val),
-                    0x800000 => println!("IRDA MODE 0x{:08x}", val),
-                    0x800004 => println!("IRDA DATA 0x{:08x}", val),
+                    0x800000 => self.irda.store::<A>(0, val),
+                    0x800004 => self.irda.store::<A>(4, val),
                     _ => unimplemented(),
                 },
             0x0d =>

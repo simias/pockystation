@@ -7,6 +7,7 @@ mod box_array;
 mod cpu;
 mod memory;
 mod dac;
+mod irda;
 
 fn main() {
     let args: Vec<_> = ::std::env::args().collect();

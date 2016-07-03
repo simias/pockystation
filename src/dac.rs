@@ -1,4 +1,4 @@
-//! PocketStation Audio DAC emulator
+//! PocketStation Audio DAC emulation
 
 use memory::Addressable;
 
