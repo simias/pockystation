@@ -15,17 +15,17 @@ pub fn execute(cpu: &mut Cpu, instruction: u32) {
 pub struct Instruction(u32);
 
 impl Instruction {
-    fn condition_code(self) -> u32 {
-        self.0 >> 28
-    }
-
-    /// We use a LUT to decode the instruction based on bits [27:20]
-    /// and [7:4]. That gives us 4096 possibilities.
+    /// We decode the instruction based on bits [27:20] and
+    /// [7:4]. That gives us 4096 possibilities.
     fn opcode(self) -> u32 {
         let opcode_hi = (self.0 >> 20) & 0xff;
         let opcode_lo = (self.0 >> 4) & 0xf;
 
         (opcode_hi << 4) | opcode_lo
+    }
+
+    fn condition_code(self) -> u32 {
+        self.0 >> 28
     }
 
     fn rd(self) -> RegisterIndex {
@@ -275,8 +275,7 @@ impl Instruction {
         let thumb = (target & 1) != 0;
         let address = target & !1;
 
-        cpu.set_thumb(thumb);
-        cpu.set_pc(address);
+        cpu.set_pc_thumb(address, thumb);
     }
 
     fn op150_cmp_lshift(self, cpu: &mut Cpu) {

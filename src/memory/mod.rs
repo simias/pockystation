@@ -23,7 +23,7 @@ impl Interconnect {
         }
     }
 
-    pub fn read<A: Addressable>(&self, addr: u32) -> u32 {
+    pub fn load<A: Addressable>(&self, addr: u32) -> u32 {
         let region = addr >> 24;
         let offset = addr & 0xffffff;
 
@@ -189,6 +189,15 @@ pub struct Byte;
 impl Addressable for Byte {
     fn size() -> u8 {
         1
+    }
+}
+
+/// Marker for HalfWord (16bit) access
+pub struct HalfWord;
+
+impl Addressable for HalfWord {
+    fn size() -> u8 {
+        2
     }
 }
 

@@ -1,9 +1,10 @@
 use std::fmt;
 use std::mem::swap;
 
-use memory::{Interconnect, Word, Byte};
+use memory::{Interconnect, Word, HalfWord, Byte};
 
 mod armv4_is;
+mod thumbv1_is;
 
 pub struct Cpu {
     /// Negative condition flag
@@ -31,6 +32,8 @@ pub struct Cpu {
     fiq_bank: [u32; 8],
     /// PC of the next instruction to be executed
     next_pc: u32,
+    /// If true we're in Thumb mode, otherwise ARM
+    thumb: bool,
     /// CPU operating mode
     mode: Mode,
     /// If `true` interrupts are enabled
@@ -59,6 +62,7 @@ impl Cpu {
                 irq_bank: [0; 3],
                 fiq_bank: [0; 8],
                 next_pc: 0,
+                thumb: false,
                 // Supervisor mode on reset
                 mode: Mode::Supervisor,
                 // IRQs disabled on reset
@@ -75,34 +79,45 @@ impl Cpu {
     }
 
     pub fn run_next_instruction(&mut self) {
-        // XXX handle thumb mode
         println!("{:?}", self);
 
         let pc = self.next_pc;
 
         self.next_pc = self.registers[15];
 
-        // the PC register (r15) always points to the current
-        // instruction's addres + 8, except for STR/STM instructions
-        // that store R15 where it's implementation whether it's +8 or
-        // +12. I need to check which it is for the ARM7TDMI used in
-        // the PocketStation.
-        self.registers[15] += 4;
+        if self.thumb {
+            // In Thumb mode the PC register (R15) always points to
+            // the current instruction's addres + 4 or unpredictable
+            // depending on how it's used.
+            self.registers[15] += 2;
 
-        if pc & 3 != 0 {
-            panic!("Unaligned PC! {:?}", self);
-        }
+            if pc & 1 != 0 {
+                panic!("Misaligned PC! {:?}", self);
+            }
 
-        let instruction = self.load32(pc);
+            let instruction = self.load16(pc);
 
-        println!("Executing 0x{:08x}", instruction);
+            println!("Executing 0x{:04x}", instruction);
 
-        armv4_is::execute(self, instruction);
-    }
+            thumbv1_is::execute(self, instruction);
 
-    fn set_thumb(&mut self, thumb: bool) {
-        if thumb {
-            panic!("Switch to Thumb mode");
+        } else {
+            // In ARM mode the PC register (R15) always points to the
+            // current instruction's addres + 8, except for STR/STM
+            // instructions that store R15 where it's implementation
+            // whether it's +8 or +12. I need to check which it is for the
+            // ARM7TDMI used in the PocketStation.
+            self.registers[15] += 4;
+
+            if pc & 3 != 0 {
+                panic!("Misaligned PC! {:?}", self);
+            }
+
+            let instruction = self.load32(pc);
+
+            println!("Executing 0x{:08x}", instruction);
+
+            armv4_is::execute(self, instruction);
         }
     }
 
@@ -150,10 +165,10 @@ impl Cpu {
         }
     }
 
-    // Some ARM opcodes write to the PC and we're supposed to ignore
-    // the two LSB (effectively word-aligning the PC no matter
-    // what). Some other opcodes aren't documented in the manual as
-    // doing that so I use `set_reg` directly for those.
+    /// Some ARM opcodes write to the PC and we're supposed to ignore
+    /// the two LSB (effectively word-aligning the PC no matter
+    /// what). Some other opcodes aren't documented in the manual as
+    /// doing that so I use `set_reg` directly for those.
     fn set_reg_pc_mask(&mut self, r: RegisterIndex, v: u32) {
         if r.is_pc() {
             self.set_pc(v & !3);
@@ -164,7 +179,26 @@ impl Cpu {
 
     fn set_pc(&mut self, pc: u32) {
         self.next_pc = pc;
-        self.registers[15] = pc + 4
+
+        let r15_offset = 
+            if self.thumb {
+                2
+            } else {
+                4
+            };
+
+        self.registers[15] = pc + r15_offset;
+    }
+
+    /// Change the value of the PC update the thumb state. Since the
+    /// PC register value depends on whether we're in ARM on Thumb
+    /// mode (+8 or +4 respectively) it's important to change the
+    /// instruction mode before we write the new PC when the mode
+    /// changes, this function takes care of that.
+    fn set_pc_thumb(&mut self, pc: u32, thumb: bool) {
+        self.thumb = thumb;
+
+        self.set_pc(pc);
     }
 
     fn change_mode(&mut self, mode: Mode) {
@@ -299,14 +333,24 @@ impl Cpu {
         }
     }
 
+    fn load16(&mut self, addr: u32) -> u16 {
+        if addr & 1 != 0 {
+            panic!("Unaligned load16! 0x{:08x} {:?}", addr, self);
+        }
+
+        println!("load16 {:08x}", addr);
+
+        self.inter.load::<HalfWord>(addr) as u16
+    }
+
     fn load32(&mut self, addr: u32) -> u32 {
         if addr & 3 != 0 {
             panic!("Unaligned load32! 0x{:08x} {:?}", addr, self);
         }
 
-        println!("load {:08x}", addr);
+        println!("load32 {:08x}", addr);
 
-        self.inter.read::<Word>(addr)
+        self.inter.load::<Word>(addr)
     }
 
     fn store32(&mut self, addr: u32, val: u32) {
@@ -328,15 +372,23 @@ impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         try!(writeln!(f, "IP:  0x{:08x}  Mode: {:?}", self.next_pc, self.mode));
 
+        let is =
+            if self.thumb {
+                "Thumb"
+            } else {
+                "ARM"
+            };
+
         let flag = |f, l| if f { l } else { '-' };
 
-        try!(writeln!(f, "{}{}{}{} {}{}",
+        try!(writeln!(f, "{}{}{}{} {}{} {}",
                       flag(self.n, 'N'),
                       flag(self.z, 'Z'),
                       flag(self.c, 'C'),
                       flag(self.v, 'V'),
                       flag(self.irq_en, 'I'),
-                      flag(self.fiq_en, 'F')));
+                      flag(self.fiq_en, 'F'),
+                      is));
 
         for i in 0..10 {
             try!(write!(f, "R{}:  0x{:08x}", i, self.registers[i]));
