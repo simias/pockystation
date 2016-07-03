@@ -35,6 +35,12 @@ impl Instruction {
         RegisterIndex(r as u32)
     }
 
+    fn rm_full(self) -> RegisterIndex {
+        let r = (self.0 >> 3) & 0xf;
+
+        RegisterIndex(r as u32)
+    }
+
     fn imm8(self) -> u32 {
         (self.0 & 0xff) as u32
     }
@@ -52,16 +58,35 @@ impl Instruction {
         (offset >> 21) as u32
     }
 
+    fn signed_imm8(self) -> u32 {
+        let offset = (self.0 & 0xff) as i8;
+
+        // sign extend
+        offset as u32
+    }
+
     fn b_imm_offset_11(self) -> u32 {
         (self.0 & 0x7ff) as u32
+    }
+
+    fn register_list(self) -> u32 {
+        (self.0 & 0xff) as u32
     }
 
     fn execute(self, cpu: &mut Cpu) {
         match self.opcode() {
             0x080...0x09f => self.op08x_mov_i(cpu),
             0x100         => self.op100_and(cpu),
+            0x108         => self.op108_tst(cpu),
+            0x10c         => self.op10c_orr(cpu),
+            0x10f         => self.op10f_mvn(cpu),
+            0x11c | 0x11d => self.op11c_bx(cpu),
             0x120...0x13f => self.op12x_ldr_pc(cpu),
+            0x180...0x19f => self.op18x_str_ri5(cpu),
             0x1a0...0x1bf => self.op1ax_ldr_ri5(cpu),
+            0x2d0...0x2d3 => self.op2d0_push(cpu),
+            0x2d4...0x2d7 => self.op2d4_push_lr(cpu),
+            0x340...0x343 => self.op340_beq(cpu),
             0x3c0...0x3df => self.op3cx_bl_hi(cpu),
             0x3e0...0x3ff => self.op3ex_bl_lo(cpu),
             _ => self.unimplemented(cpu),
@@ -98,6 +123,59 @@ impl Instruction {
         cpu.set_z(val == 0);
     }
 
+    fn op108_tst(self, cpu: &mut Cpu) {
+        let rn = self.reg_0();
+        let rm = self.reg_3();
+
+        let a = cpu.reg(rn);
+        let b = cpu.reg(rm);
+
+        let val = a & b;
+
+        cpu.set_n((val as i32) < 0);
+        cpu.set_z(val == 0);
+    }
+
+    fn op10c_orr(self, cpu: &mut Cpu) {
+        let rd = self.reg_0();
+        let rm = self.reg_3();
+
+        let a = cpu.reg(rd);
+        let b = cpu.reg(rm);
+
+        let val = a | b;
+
+        cpu.set_reg(rd, val);
+        cpu.set_n((val as i32) < 0);
+        cpu.set_z(val == 0);
+    }
+
+    fn op10f_mvn(self, cpu: &mut Cpu) {
+        let rd = self.reg_0();
+        let rm = self.reg_3();
+
+        let val = !cpu.reg(rm);
+
+        cpu.set_reg(rd, val);
+        cpu.set_n((val as i32) < 0);
+        cpu.set_z(val == 0);
+    }
+
+    fn op11c_bx(self, cpu: &mut Cpu) {
+        let rm = self.rm_full();
+
+        if (self.0 & 7) != 0 {
+            // Should be 0
+            panic!("Invalid BX instruction {}", self);
+        }
+
+        let target = cpu.reg(rm);
+
+        let thumb = (target & 1) != 0;
+
+        cpu.set_pc_thumb(target & !1, thumb);
+    }
+
     fn op12x_ldr_pc(self, cpu: &mut Cpu) {
         let rd = self.reg_8();
         let offset = self.imm8() << 2;
@@ -109,6 +187,91 @@ impl Instruction {
         let val = cpu.load32(addr);
 
         cpu.set_reg(rd, val);
+    }
+
+    fn op18x_str_ri5(self, cpu: &mut Cpu) {
+        let rd     = self.reg_0();
+        let rn     = self.reg_3();
+        let offset = self.imm5() << 2;
+
+        let base = cpu.reg(rn);
+
+        let addr = base.wrapping_add(offset);
+
+        let val = cpu.reg(rd);
+
+        cpu.store32(addr, val);
+    }
+
+    fn op2d0_push(self, cpu: &mut Cpu) {
+        let list = self.register_list();
+
+        // Push are SP-relative
+        let sp = RegisterIndex(13);
+
+        let num_regs = list.count_ones();
+
+        if num_regs == 0 {
+            panic!("Unpredictable PUSH {}", self);
+        }
+
+        let start_addr = cpu.reg(sp).wrapping_sub(4 * num_regs);
+
+        let mut addr = start_addr;
+
+        for i in 0..8 {
+            if ((list >> i) & 1) != 0 {
+                let reg = RegisterIndex(i);
+
+                let val = cpu.reg(reg);
+                cpu.store32(addr, val);
+
+                addr = addr.wrapping_add(4);
+            }
+        }
+
+        cpu.set_reg(sp, start_addr);
+    }
+
+    fn op2d4_push_lr(self, cpu: &mut Cpu) {
+        let list = self.register_list();
+
+        // Push are SP-relative
+        let sp = RegisterIndex(13);
+
+        // Register list + LR
+        let num_regs = list.count_ones() + 1;
+
+        let start_addr = cpu.reg(sp).wrapping_sub(4 * num_regs);
+
+        let mut addr = start_addr;
+
+        for i in 0..8 {
+            if ((list >> i) & 1) != 0 {
+                let reg = RegisterIndex(i);
+
+                let val = cpu.reg(reg);
+                cpu.store32(addr, val);
+
+                addr = addr.wrapping_add(4);
+            }
+        }
+
+        // Push LR
+        let lr = cpu.reg(RegisterIndex(14));
+        cpu.store32(addr, lr);
+
+        cpu.set_reg(sp, start_addr);
+    }
+
+    fn op340_beq(self, cpu: &mut Cpu) {
+        let offset = self.signed_imm8() << 1;
+
+        if cpu.z() {
+            let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
+
+            cpu.set_pc(pc);
+        }
     }
 
     fn op1ax_ldr_ri5(self, cpu: &mut Cpu) {

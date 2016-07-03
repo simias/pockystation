@@ -544,7 +544,7 @@ impl Instruction {
     fn opaxx_b(self, cpu: &mut Cpu) {
         let offset = self.branch_imm_offset();
 
-        let pc = cpu.registers[15].wrapping_add(offset);
+        let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
 
         cpu.set_pc(pc);
     }

@@ -1,9 +1,12 @@
+use dac::Dac;
+
 pub struct Interconnect {
     kernel: Box<[u8; KERNEL_SIZE]>,
     ram: Box<[u8; RAM_SIZE]>,
     /// When true the kernel is mirrored at address 0. Set on reset so
     /// that the reset vector starts executing from the kernel.
     kernel_at_0: bool,
+    dac: Dac,
 }
 
 impl Interconnect {
@@ -20,6 +23,7 @@ impl Interconnect {
             kernel: kernel_array,
             ram: box_array![0xca; RAM_SIZE],
             kernel_at_0: true,
+            dac: Dac::new(),
         }
     }
 
@@ -39,7 +43,7 @@ impl Interconnect {
                 if self.kernel_at_0 {
                     self.read_kernel::<A>(offset)
                 } else {
-                    panic!("Ram access");
+                    self.read_ram::<A>(offset)
                 },
             0x04 => self.read_kernel::<A>(offset),
             0x06 =>
@@ -60,6 +64,12 @@ impl Interconnect {
                 match offset {
                     // CLK MODE: reply that the clock is ready (locked?)
                     0 => 0x10,
+                    _ => unimplemented(),
+                },
+            0x0d =>
+                match offset {
+                    0x800010 => self.dac.load::<A>(0),
+                    0x800014 => self.dac.load::<A>(4),
                     _ => unimplemented(),
                 },
             _ => unimplemented(),
@@ -137,8 +147,8 @@ impl Interconnect {
                     0x800000 => println!("IOP CTRL 0x{:08x}", val),
                     0x800004 => println!("IOP STOP 0x{:08x}", val),
                     0x800008 => println!("IOP START 0x{:08x}", val),
-                    0x800010 => println!("DAC CTRL 0x{:08x}", val),
-                    0x800014 => println!("DAC DATA 0x{:08x}", val),
+                    0x800010 => self.dac.store::<A>(0, val),
+                    0x800014 => self.dac.store::<A>(4, val),
                     0x800020 => println!("BATT CTRL 0x{:08x}", val),
                     _ => unimplemented(),
                 },
@@ -153,6 +163,18 @@ impl Interconnect {
 
         for i in 0..A::size() as usize {
             r |= (self.kernel[offset + i] as u32) << (8 * i)
+        }
+
+        r
+    }
+
+    fn read_ram<A: Addressable>(&self, offset: u32) -> u32 {
+        let offset = offset as usize;
+
+        let mut r = 0;
+
+        for i in 0..A::size() as usize {
+            r |= (self.ram[offset + i] as u32) << (8 * i)
         }
 
         r
