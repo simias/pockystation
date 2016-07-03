@@ -8,6 +8,7 @@ mod cpu;
 mod memory;
 mod dac;
 mod irda;
+mod lcd;
 
 fn main() {
     let args: Vec<_> = ::std::env::args().collect();

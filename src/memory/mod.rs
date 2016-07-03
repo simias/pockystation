@@ -1,3 +1,4 @@
+use lcd::Lcd;
 use dac::Dac;
 use irda::Irda;
 
@@ -7,6 +8,7 @@ pub struct Interconnect {
     /// When true the kernel is mirrored at address 0. Set on reset so
     /// that the reset vector starts executing from the kernel.
     kernel_at_0: bool,
+    lcd: Lcd,
     dac: Dac,
     irda: Irda,
 }
@@ -25,6 +27,7 @@ impl Interconnect {
             kernel: kernel_array,
             ram: box_array![0xca; RAM_SIZE],
             kernel_at_0: true,
+            lcd: Lcd::new(),
             dac: Dac::new(),
             irda: Irda::new(),
         }
@@ -79,6 +82,7 @@ impl Interconnect {
                 },
             0x0d =>
                 match offset {
+                    0...0x1ff => self.lcd.load::<A>(offset),
                     0x800010 => self.dac.load::<A>(0),
                     0x800014 => self.dac.load::<A>(4),
                     _ => unimplemented(),
@@ -148,13 +152,7 @@ impl Interconnect {
                 },
             0x0d =>
                 match offset {
-                    0x0 => println!("LCD MODE 0x{:08x}", val),
-                    0x4 => println!("LCD CAL 0x{:08x}", val),
-                    0x100...0x17c => {
-                        let row = (offset & 0x7f) / 4;
-
-                        println!("LCD VRAM{} 0x{:08x}", row, val);
-                    },
+                    0...0x1ff => self.lcd.store::<A>(offset, val),
                     0x800000 => println!("IOP CTRL 0x{:08x}", val),
                     0x800004 => println!("IOP STOP 0x{:08x}", val),
                     0x800008 => println!("IOP START 0x{:08x}", val),
