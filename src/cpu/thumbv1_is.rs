@@ -41,6 +41,13 @@ impl Instruction {
         RegisterIndex(r as u32)
     }
 
+    fn rd_full(self) -> RegisterIndex {
+        let lo = (self.0 & 0x1f) as u32;
+        let hi = ((self.0 >> 7) & 1) as u32;
+
+        RegisterIndex((hi << 3) | lo)
+    }
+
     fn imm8(self) -> u32 {
         (self.0 & 0xff) as u32
     }
@@ -87,6 +94,7 @@ impl Instruction {
             0x108         => self.op108_tst(cpu),
             0x10c         => self.op10c_orr(cpu),
             0x10f         => self.op10f_mvn(cpu),
+            0x118...0x11b => self.op118_cpy(cpu),
             0x11c | 0x11d => self.op11c_bx(cpu),
             0x120...0x13f => self.op12x_ldr_pc(cpu),
             0x180...0x19f => self.op18x_str_ri5(cpu),
@@ -259,6 +267,16 @@ impl Instruction {
         let thumb = (target & 1) != 0;
 
         cpu.set_pc_thumb(target & !1, thumb);
+    }
+
+    /// Also known as MOV(3)
+    fn op118_cpy(self, cpu: &mut Cpu) {
+        let rm = self.rm_full();
+        let rd = self.rd_full();
+
+        let val = cpu.reg(rm);
+
+        cpu.set_reg(rd, val);
     }
 
     fn op12x_ldr_pc(self, cpu: &mut Cpu) {
