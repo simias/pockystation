@@ -316,6 +316,15 @@ impl Cpu {
         r
     }
 
+    fn spsr(&self) -> u32 {
+        if self.mode.has_spsr() {
+            self.spsr
+        } else {
+            panic!("Attempted to access SPSR in {:?} mode",
+                   self.mode);
+        }
+    }
+
     /// Software interrupt, also called "SVC" (supervisor call) in
     /// modern ARM architectures.
     fn swi(&mut self) {

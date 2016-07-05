@@ -217,6 +217,7 @@ impl Instruction {
             0x000 | 0x008 => self.op000_and_lshift(cpu),
             0x120         => self.op120_msr_cpsr(cpu),
             0x121         => self.op121_bx(cpu),
+            0x140         => self.op140_mrs_spsr(cpu),
             0x150 | 0x158 => self.op150_cmp_lshift(cpu),
             0x1a0 | 0x1a8 => self.op1a0_mov_lshift(cpu),
             0x1cb         => self.op1cb_strh_pui(cpu),
@@ -287,6 +288,18 @@ impl Instruction {
         let address = target & !1;
 
         cpu.set_pc_thumb(address, thumb);
+    }
+
+    fn op140_mrs_spsr(self, cpu: &mut Cpu) {
+        let rd = self.rd();
+
+        if rd.is_pc() || (self.0 & 0xf0fff) != 0xf0000 {
+            panic!("Invalid MSR instruction {}", self);
+        }
+
+        let val = cpu.spsr();
+
+        cpu.set_reg(rd, val);
     }
 
     fn op150_cmp_lshift(self, cpu: &mut Cpu) {
