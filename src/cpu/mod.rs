@@ -204,6 +204,26 @@ impl Cpu {
         self.set_pc(pc);
     }
 
+    fn set_pc_cpsr(&mut self, pc: u32, cpsr: u32) {
+        let mode = Mode::from_field(cpsr & 0x1f);
+
+        self.maybe_change_mode(mode);
+
+        self.thumb = (cpsr & 0x20) != 0;
+
+        self.fiq_en = (cpsr & 0x40) == 0;
+        self.irq_en = (cpsr & 0x80) == 0;
+
+        let flags = cpsr >> 28;
+
+        self.v = (flags & 1) != 0;
+        self.c = (flags & 2) != 0;
+        self.z = (flags & 4) != 0;
+        self.n = (flags & 8) != 0;
+
+        self.set_pc(pc);
+    }
+
     fn change_mode(&mut self, mode: Mode) {
         // The FIQ banking code assumes we can't bank to the same
         // mode, otherwise the non-FIQ R8-R14 could be lost.
@@ -356,9 +376,7 @@ impl Cpu {
             // Set control bits
             let mode = Mode::from_field((val & 0xf) | 0x10);
 
-            if mode != self.mode {
-                self.change_mode(mode);
-            }
+            self.maybe_change_mode(mode);
 
             let thumb = (val & 0x20) != 0;
 

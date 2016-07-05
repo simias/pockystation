@@ -237,6 +237,7 @@ impl Instruction {
             0x790 | 0x798 => self.op790_ldr_ipu(cpu),
             0x8a0...0x8af => self.op8ax_stm_uw(cpu),
             0x8b0...0x8bf => self.op8bx_ldm_uw(cpu),
+            0x8f0...0x8ff => self.op8fx_ldm_spsr_uw(cpu),
             0x920...0x92f => self.op92x_stm_pw(cpu),
             0xa00...0xaff => self.opaxx_b(cpu),
             0xb00...0xbff => self.opbxx_bl(cpu),
@@ -597,6 +598,43 @@ impl Instruction {
         }
 
         cpu.set_reg(rn, addr);
+    }
+
+    fn op8fx_ldm_spsr_uw(self, cpu: &mut Cpu) {
+        let rn   = self.rn();
+        let list = self.register_list();
+
+        if rn.is_pc() || (list & (1 << rn.0)) != 0 {
+            // Can't load to the base register if we want writeback
+            panic!("Unpredictable LDM");
+        }
+
+        if (list & (1 << 15)) == 0 {
+            panic!("LDM SPSR without PC!");
+        }
+
+        let mut addr = cpu.reg(rn);
+
+        for i in 0..15 {
+            if ((list >> i) & 1) != 0 {
+                let reg = RegisterIndex(i);
+
+                let val = cpu.load32(addr);
+
+                cpu.set_reg(reg, val);
+
+                addr = addr.wrapping_add(4);
+            }
+        }
+
+        let pc = cpu.load32(addr);
+        addr = addr.wrapping_add(4);
+
+        cpu.set_reg(rn, addr);
+
+        let spsr = cpu.spsr();
+
+        cpu.set_pc_cpsr(pc, spsr);
     }
 
     fn op92x_stm_pw(self, cpu: &mut Cpu) {
