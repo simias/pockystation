@@ -99,6 +99,8 @@ impl Instruction {
             0x120...0x13f => self.op12x_ldr_pc(cpu),
             0x180...0x19f => self.op18x_str_ri5(cpu),
             0x1a0...0x1bf => self.op1ax_ldr_ri5(cpu),
+            0x1c0...0x1df => self.op1cx_strb_ri5(cpu),
+            0x200...0x21f => self.op20x_strh_ri5(cpu),
             0x2d0...0x2d3 => self.op2d0_push(cpu),
             0x2d4...0x2d7 => self.op2d4_push_lr(cpu),
             0x2f0...0x2f3 => self.op2f0_pop(cpu),
@@ -464,6 +466,34 @@ impl Instruction {
         let val = cpu.load32(addr);
 
         cpu.set_reg(rd, val);
+    }
+
+    fn op1cx_strb_ri5(self, cpu: &mut Cpu) {
+        let rd     = self.reg_0();
+        let rn     = self.reg_3();
+        let offset = self.imm5();
+
+        let addr = cpu.reg(rn).wrapping_add(offset);
+
+        let val = cpu.reg(rd);
+
+        cpu.store8(addr, val);
+    }
+
+    fn op20x_strh_ri5(self, cpu: &mut Cpu) {
+        let rd     = self.reg_0();
+        let rn     = self.reg_3();
+        let offset = self.imm5() << 1;
+
+        let addr = cpu.reg(rn).wrapping_add(offset);
+
+        if (addr & 1) != 0 {
+            panic!("Unpredictable STRH");
+        }
+
+        let val = cpu.reg(rd);
+
+        cpu.store16(addr, val);
     }
 
     fn op3cx_bl_hi(self, cpu: &mut Cpu) {

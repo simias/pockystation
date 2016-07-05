@@ -363,7 +363,19 @@ impl Cpu {
         self.inter.store::<Word>(addr, val);
     }
 
+    fn store16(&mut self, addr: u32, val: u32) {
+        if addr & 1 != 0 {
+            panic!("Unaligned store16! 0x{:08x} {:?}", addr, self);
+        }
+
+        println!("store16 0x{:08x} @ 0x{:08x}", val, addr);
+
+        self.inter.store::<HalfWord>(addr, val);
+    }
+
     fn store8(&mut self, addr: u32, val: u32) {
+        println!("store8 0x{:08x} @ 0x{:08x}", val, addr);
+
         self.inter.store::<Byte>(addr, val);
     }
 }
