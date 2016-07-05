@@ -183,7 +183,7 @@ impl Cpu {
     fn set_pc(&mut self, pc: u32) {
         self.next_pc = pc;
 
-        let r15_offset = 
+        let r15_offset =
             if self.thumb {
                 2
             } else {
@@ -432,7 +432,15 @@ impl Cpu {
 
 impl fmt::Debug for Cpu {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        try!(writeln!(f, "IP:  0x{:08x}  Mode: {:?}", self.next_pc, self.mode));
+        try!(writeln!(f, "CPC:  0x{:08x}  Mode: {:?}",
+                      self.next_pc, self.mode));
+
+        if self.mode.has_spsr() {
+            try!(writeln!(f, "CPSR: 0x{:08x}  SPSR: 0x{:08x}",
+                          self.cpsr(), self.spsr));
+        } else {
+            try!(writeln!(f, "CPSR: 0x{:08x}", self.cpsr()));
+        }
 
         let is =
             if self.thumb {
@@ -452,12 +460,8 @@ impl fmt::Debug for Cpu {
                       flag(self.fiq_en, 'F'),
                       is));
 
-        if self.mode.has_spsr() {
-            try!(writeln!(f, "SPSR: {:08x}", self.spsr));
-        }
-
         for i in 0..10 {
-            try!(write!(f, "R{}:  0x{:08x}", i, self.registers[i]));
+            try!(write!(f, "R{}:   0x{:08x}", i, self.registers[i]));
 
             if i % 2 == 0 {
                 try!(write!(f, "  "));
@@ -467,7 +471,7 @@ impl fmt::Debug for Cpu {
         }
 
         for i in 10..16 {
-            try!(write!(f, "R{}: 0x{:08x}", i, self.registers[i]));
+            try!(write!(f, "R{}:  0x{:08x}", i, self.registers[i]));
 
             if i % 2 == 0 {
                 try!(write!(f, "  "));

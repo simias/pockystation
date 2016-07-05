@@ -214,13 +214,15 @@ impl Instruction {
 
     fn decode_and_execute(self, cpu: &mut Cpu) {
         match self.opcode() {
-            0x000 | 0x008 => self.op000_and_lshift(cpu),
+            0x000 | 0x008 => self.op000_and_lsl_i(cpu),
+            0x080 | 0x088 => self.op080_add_lsl_i(cpu),
             0x120         => self.op120_msr_cpsr(cpu),
             0x121         => self.op121_bx(cpu),
             0x140         => self.op140_mrs_spsr(cpu),
-            0x150 | 0x158 => self.op150_cmp_lshift(cpu),
-            0x1a0 | 0x1a8 => self.op1a0_mov_lshift(cpu),
+            0x150 | 0x158 => self.op150_cmp_lsl_i(cpu),
+            0x1a0 | 0x1a8 => self.op1a0_mov_lsl_i(cpu),
             0x1cb         => self.op1cb_strh_pui(cpu),
+            0x1db         => self.op1db_ldrh_pui(cpu),
             0x200...0x20f => self.op20x_and_i(cpu),
             0x240...0x24f => self.op24x_sub_i(cpu),
             0x280...0x28f => self.op28x_add_i(cpu),
@@ -232,6 +234,7 @@ impl Instruction {
             0x590...0x59f => self.op59x_ldr_pu(cpu),
             0x5c0...0x5cf => self.op5cx_strb_pu(cpu),
             0x780 | 0x788 => self.op780_str_ipu(cpu),
+            0x790 | 0x798 => self.op790_ldr_ipu(cpu),
             0x8a0...0x8af => self.op8ax_stm_uw(cpu),
             0x8b0...0x8bf => self.op8bx_ldm_uw(cpu),
             0x920...0x92f => self.op92x_stm_pw(cpu),
@@ -248,12 +251,24 @@ impl Instruction {
                self.opcode());
     }
 
-    fn op000_and_lshift(self, cpu: &mut Cpu) {
+    fn op000_and_lsl_i(self, cpu: &mut Cpu) {
         let dst = self.rd();
         let rn  = self.rn();
         let and = self.mode1_register_lshift_imm_no_carry(cpu);
 
         let val = cpu.reg(rn) & and;
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op080_add_lsl_i(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let rn  = self.rn();
+        let b   = self.mode1_register_lshift_imm_no_carry(cpu);
+
+        let a = cpu.reg(rn);
+
+        let val = a.wrapping_add(b);
 
         cpu.set_reg(dst, val);
     }
@@ -302,7 +317,7 @@ impl Instruction {
         cpu.set_reg(rd, val);
     }
 
-    fn op150_cmp_lshift(self, cpu: &mut Cpu) {
+    fn op150_cmp_lsl_i(self, cpu: &mut Cpu) {
         let rn  = self.rn();
         let rd  = self.rd();
         let b   = self.mode1_register_lshift_imm_no_carry(cpu);
@@ -326,7 +341,7 @@ impl Instruction {
         cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
     }
 
-    fn op1a0_mov_lshift(self, cpu: &mut Cpu) {
+    fn op1a0_mov_lsl_i(self, cpu: &mut Cpu) {
         let dst = self.rd();
         let val = self.mode1_register_lshift_imm_no_carry(cpu);
 
@@ -344,6 +359,19 @@ impl Instruction {
 
         cpu.store16(addr, val);
     }
+
+    fn op1db_ldrh_pui(self, cpu: &mut Cpu) {
+        let rn     = self.rn();
+        let rd     = self.rd();
+        let offset = self.mode3_imm_hl();
+
+        let addr = cpu.reg(rn).wrapping_add(offset);
+
+        let val = cpu.load16(addr);
+
+        cpu.set_reg(rd, val as u32)
+    }
+
 
     fn op20x_and_i(self, cpu: &mut Cpu) {
         let dst = self.rd();
@@ -517,6 +545,18 @@ impl Instruction {
         let val = cpu.reg(src);
 
         cpu.store32(addr, val);
+    }
+
+    fn op790_ldr_ipu(self, cpu: &mut Cpu) {
+        let dst    = self.rd();
+        let base   = self.rn();
+        let offset = self.mode2_register_lshift(cpu);
+
+        let addr = cpu.reg(base).wrapping_add(offset);
+
+        let val = cpu.load32(addr);
+
+        cpu.set_reg_pc_mask(dst, val);
     }
 
     fn op8ax_stm_uw(self, cpu: &mut Cpu) {
