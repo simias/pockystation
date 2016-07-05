@@ -52,6 +52,10 @@ impl Instruction {
         (self.0 & 0xff) as u32
     }
 
+    fn imm7(self) -> u32 {
+        (self.0 & 0x7f) as u32
+    }
+
     fn imm5(self) -> u32 {
         ((self.0 >> 6) & 0x1f) as u32
     }
@@ -87,12 +91,17 @@ impl Instruction {
     fn execute(self, cpu: &mut Cpu) {
         match self.opcode() {
             0x000...0x01f => self.op00x_lsl_ri5(cpu),
+            0x020...0x03f => self.op02x_lsr_ri5(cpu),
+            0x040...0x05f => self.op02x_asr_ri5(cpu),
+            0x070...0x077 => self.op07x_add_i3(cpu),
             0x078...0x07f => self.op07x_sub_i3(cpu),
-            0x080...0x09f => self.op08x_mov_i(cpu),
-            0x0a0...0x0bf => self.op0ax_cmp_i(cpu),
+            0x080...0x09f => self.op08x_mov_i8(cpu),
+            0x0a0...0x0bf => self.op0ax_cmp_i8(cpu),
+            0x0c0...0x0df => self.op0cx_add_i8(cpu),
             0x100         => self.op100_and(cpu),
             0x102         => self.op102_lsl_r(cpu),
             0x108         => self.op108_tst(cpu),
+            0x10a         => self.op10a_cmp(cpu),
             0x10c         => self.op10c_orr(cpu),
             0x10f         => self.op10f_mvn(cpu),
             0x118...0x11b => self.op118_cpy(cpu),
@@ -102,12 +111,16 @@ impl Instruction {
             0x1a0...0x1bf => self.op1ax_ldr_ri5(cpu),
             0x1c0...0x1df => self.op1cx_strb_ri5(cpu),
             0x200...0x21f => self.op20x_strh_ri5(cpu),
+            0x240...0x25f => self.op24x_str_sp(cpu),
+            0x260...0x27f => self.op26x_ldr_sp(cpu),
+            0x2c2...0x2c3 => self.op2c2_sub_sp(cpu),
             0x2d0...0x2d3 => self.op2d0_push(cpu),
             0x2d4...0x2d7 => self.op2d4_push_lr(cpu),
             0x2f0...0x2f3 => self.op2f0_pop(cpu),
             0x2f4...0x2f7 => self.op2f4_pop_pc(cpu),
             0x340...0x343 => self.op340_beq(cpu),
             0x344...0x347 => self.op344_bne(cpu),
+            0x37c...0x37f => self.op37c_swi(cpu),
             0x380...0x39f => self.op38x_b(cpu),
             0x3c0...0x3df => self.op3cx_bl_hi(cpu),
             0x3e0...0x3ff => self.op3ex_bl_lo(cpu),
@@ -146,6 +159,85 @@ impl Instruction {
         cpu.set_z(val == 0);
     }
 
+    fn op02x_lsr_ri5(self, cpu: &mut Cpu) {
+        let rd     = self.reg_0();
+        let rm     = self.reg_3();
+        let shift  = self.imm5();
+
+        let val = cpu.reg(rm);
+
+        let (val, carry) =
+            match shift {
+                0 => {
+                    // 0 is a special case to shift by 32 places
+                    let carry = (val & (1 << 31)) != 0;
+
+                    (0, carry)
+                }
+                _ => {
+                    let carry = (val & (1 << (shift - 1))) != 0;
+
+                    (val >> shift, carry)
+                }
+            };
+
+        cpu.set_reg(rd, val);
+        cpu.set_n(false);
+        cpu.set_z(val == 0);
+        cpu.set_c(carry);
+    }
+
+    fn op02x_asr_ri5(self, cpu: &mut Cpu) {
+        let rd     = self.reg_0();
+        let rm     = self.reg_3();
+        let shift  = self.imm5();
+
+        let val = cpu.reg(rm);
+
+        let ival = val as i32;
+
+        let (ival, carry) =
+            match shift {
+                0 => {
+                    // 0 is a special case to shift by 32 places
+                    let carry = ival < 0;
+
+                    (ival >> 31, carry)
+                }
+                _ => {
+                    let carry = (val & (1 << (shift - 1))) != 0;
+
+                    (ival >> shift, carry)
+                }
+            };
+
+        cpu.set_reg(rd, ival as u32);
+        cpu.set_n(ival < 0);
+        cpu.set_z(ival == 0);
+        cpu.set_c(carry);
+    }
+
+    fn op07x_add_i3(self, cpu: &mut Cpu) {
+        let rd = self.reg_0();
+        let rn = self.reg_3();
+        let b  = self.imm3();
+
+        let a = cpu.reg(rn);
+
+        let val = a.wrapping_add(b);
+
+        let a_neg = (a as i32) < 0;
+        let b_neg = (b as i32) < 0;
+        let v_neg = (val as i32) < 0;
+
+        cpu.set_reg(rd, val);
+
+        cpu.set_n(v_neg);
+        cpu.set_z(val == 0);
+        cpu.set_c(val < a);
+        cpu.set_v((a_neg == b_neg) & (a_neg ^ v_neg));
+    }
+
     fn op07x_sub_i3(self, cpu: &mut Cpu) {
         let rd = self.reg_0();
         let rn = self.reg_3();
@@ -166,7 +258,7 @@ impl Instruction {
         cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
     }
 
-    fn op08x_mov_i(self, cpu: &mut Cpu) {
+    fn op08x_mov_i8(self, cpu: &mut Cpu) {
         let rd  = self.reg_8();
         let val = self.imm8();
 
@@ -176,7 +268,7 @@ impl Instruction {
         cpu.set_z(val == 0);
     }
 
-    fn op0ax_cmp_i(self, cpu: &mut Cpu) {
+    fn op0ax_cmp_i8(self, cpu: &mut Cpu) {
         let rn  = self.reg_8();
         let b   = self.imm8();
 
@@ -192,6 +284,26 @@ impl Instruction {
         cpu.set_z(val == 0);
         cpu.set_c(a >= b);
         cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
+    }
+
+    fn op0cx_add_i8(self, cpu: &mut Cpu) {
+        let rd  = self.reg_8();
+        let b   = self.imm8();
+
+        let a = cpu.reg(rd);
+
+        let val = a.wrapping_add(b);
+
+        let a_neg = (a as i32) < 0;
+        let b_neg = (b as i32) < 0;
+        let v_neg = (val as i32) < 0;
+
+        cpu.set_reg(rd, val);
+
+        cpu.set_n(v_neg);
+        cpu.set_z(val == 0);
+        cpu.set_c(val < a);
+        cpu.set_v((a_neg == b_neg) & (a_neg ^ v_neg));
     }
 
     fn op100_and(self, cpu: &mut Cpu) {
@@ -255,6 +367,25 @@ impl Instruction {
 
         cpu.set_n((val as i32) < 0);
         cpu.set_z(val == 0);
+    }
+
+    fn op10a_cmp(self, cpu: &mut Cpu) {
+        let rn = self.reg_0();
+        let rm = self.reg_3();
+
+        let a = cpu.reg(rn);
+        let b = cpu.reg(rm);
+
+        let val = a.wrapping_sub(b);
+
+        let a_neg = (a as i32) < 0;
+        let b_neg = (b as i32) < 0;
+        let v_neg = (val as i32) < 0;
+
+        cpu.set_n(v_neg);
+        cpu.set_z(val == 0);
+        cpu.set_c(a >= b);
+        cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
     }
 
     fn op10c_orr(self, cpu: &mut Cpu) {
@@ -472,6 +603,10 @@ impl Instruction {
         }
     }
 
+    fn op37c_swi(self, cpu: &mut Cpu) {
+        cpu.swi()
+    }
+
     fn op38x_b(self, cpu: &mut Cpu) {
         let offset = self.signed_imm11() << 1;
 
@@ -520,6 +655,42 @@ impl Instruction {
         let val = cpu.reg(rd);
 
         cpu.store16(addr, val);
+    }
+
+    fn op24x_str_sp(self, cpu: &mut Cpu) {
+        let rd  = self.reg_8();
+        let imm = self.imm8() << 2;
+
+        let sp = RegisterIndex(13);
+
+        let addr = cpu.reg(sp).wrapping_add(imm);
+
+        let val = cpu.reg(rd);
+
+        cpu.store16(addr, val);
+    }
+
+    fn op26x_ldr_sp(self, cpu: &mut Cpu) {
+        let rd  = self.reg_8();
+        let imm = self.imm8() << 2;
+
+        let sp = RegisterIndex(13);
+
+        let addr = cpu.reg(sp).wrapping_add(imm);
+
+        let val = cpu.load32(addr);
+
+        cpu.set_reg(rd, val);
+    }
+
+    fn op2c2_sub_sp(self, cpu: &mut Cpu) {
+        let offset = self.imm7() << 2;
+
+        let sp = RegisterIndex(13);
+
+        let val = cpu.reg(sp);
+
+        cpu.set_reg(sp, val.wrapping_sub(offset));
     }
 
     fn op3cx_bl_hi(self, cpu: &mut Cpu) {
