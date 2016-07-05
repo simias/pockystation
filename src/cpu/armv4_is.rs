@@ -97,6 +97,15 @@ impl Instruction {
         val << shift
     }
 
+    /// Addressing mode 3: Miscellaneous loads and stores - immediate
+    /// offset
+    fn mode3_imm_hl(self) -> u32 {
+        let hi = (self.0 >> 8) & 0xf;
+        let lo = self.0 & 0xf;
+
+        (hi << 4) | lo
+    }
+
     fn branch_imm_offset(self) -> u32 {
         // offset must be sign-extented
         let offset = (self.0 << 8) as i32;
@@ -210,6 +219,7 @@ impl Instruction {
             0x121         => self.op121_bx(cpu),
             0x150 | 0x158 => self.op150_cmp_lshift(cpu),
             0x1a0 | 0x1a8 => self.op1a0_mov_lshift(cpu),
+            0x1cb         => self.op1cb_strh_pui(cpu),
             0x200...0x20f => self.op20x_and_i(cpu),
             0x240...0x24f => self.op24x_sub_i(cpu),
             0x280...0x28f => self.op28x_add_i(cpu),
@@ -226,6 +236,7 @@ impl Instruction {
             0x920...0x92f => self.op92x_stm_pw(cpu),
             0xa00...0xaff => self.opaxx_b(cpu),
             0xb00...0xbff => self.opbxx_bl(cpu),
+            0xf00...0xfff => self.opfxx_swi(cpu),
             _             => self.unimplemented(cpu),
         }
     }
@@ -307,6 +318,18 @@ impl Instruction {
         let val = self.mode1_register_lshift_imm_no_carry(cpu);
 
         cpu.set_reg(dst, val);
+    }
+
+    fn op1cb_strh_pui(self, cpu: &mut Cpu) {
+        let rn     = self.rn();
+        let rd     = self.rd();
+        let offset = self.mode3_imm_hl();
+
+        let addr = cpu.reg(rn).wrapping_add(offset);
+
+        let val = cpu.reg(rd);
+
+        cpu.store16(addr, val);
     }
 
     fn op20x_and_i(self, cpu: &mut Cpu) {
@@ -559,6 +582,10 @@ impl Instruction {
         cpu.set_reg(RegisterIndex(14), ra);
 
         cpu.set_pc(pc);
+    }
+
+    fn opfxx_swi(self, cpu: &mut Cpu) {
+        cpu.swi();
     }
 }
 

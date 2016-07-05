@@ -86,6 +86,7 @@ impl Instruction {
 
     fn execute(self, cpu: &mut Cpu) {
         match self.opcode() {
+            0x000...0x01f => self.op00x_lsl_ri5(cpu),
             0x078...0x07f => self.op07x_sub_i3(cpu),
             0x080...0x09f => self.op08x_mov_i(cpu),
             0x0a0...0x0bf => self.op0ax_cmp_i(cpu),
@@ -118,6 +119,31 @@ impl Instruction {
         panic!("Unimplemented instruction {} ({:03x})",
                self,
                self.opcode());
+    }
+
+    fn op00x_lsl_ri5(self, cpu: &mut Cpu) {
+        let rd     = self.reg_0();
+        let rm     = self.reg_3();
+        let shift  = self.imm5();
+
+        let val = cpu.reg(rm);
+
+        let val =
+            match shift {
+                0 => val,
+                _ => {
+                    let shifted = (val as u64) << shift;
+
+                    let carry = (shifted & (1 << 32)) != 0;
+
+                    cpu.set_c(carry);
+                    shifted as u32
+                }
+            };
+
+        cpu.set_reg(rd, val);
+        cpu.set_n((val as i32) < 0);
+        cpu.set_z(val == 0);
     }
 
     fn op07x_sub_i3(self, cpu: &mut Cpu) {
@@ -193,7 +219,7 @@ impl Instruction {
         let val =
             match shift {
                 0 => val,
-                0...31 => {
+                1...31 => {
                     let shifted = (val as u64) << shift;
 
                     let carry = (shifted & (1 << 32)) != 0;

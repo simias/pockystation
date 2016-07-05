@@ -40,6 +40,8 @@ pub struct Cpu {
     irq_en: bool,
     /// If `true` fast interrupts are enabled
     fiq_en: bool,
+    /// Saved program status register
+    spsr: u32,
     /// Interconnect to the memory
     inter: Interconnect,
 }
@@ -69,6 +71,7 @@ impl Cpu {
                 irq_en: false,
                 // FIQs disabled on reset
                 fiq_en: false,
+                spsr: 0,
                 inter: inter,
             };
 
@@ -206,9 +209,6 @@ impl Cpu {
         // mode, otherwise the non-FIQ R8-R14 could be lost.
         assert!(self.mode != mode);
 
-        // XXX handle SPSR
-        let mut _spsr = 0;
-
         // First save the current mode's banked registers
         match self.mode {
             Mode::User | Mode::System => {
@@ -217,27 +217,27 @@ impl Cpu {
                 self.user_system_bank[1] = self.registers[13];
             },
             Mode::Supervisor => {
-                self.supervisor_bank[0] = _spsr;
+                self.supervisor_bank[0] = self.spsr;
                 self.supervisor_bank[1] = self.registers[14];
                 self.supervisor_bank[2] = self.registers[13];
             }
             Mode::Abort => {
-                self.abort_bank[0] = _spsr;
+                self.abort_bank[0] = self.spsr;
                 self.abort_bank[1] = self.registers[14];
                 self.abort_bank[2] = self.registers[13];
             }
             Mode::Undefined => {
-                self.undefined_bank[0] = _spsr;
+                self.undefined_bank[0] = self.spsr;
                 self.undefined_bank[1] = self.registers[14];
                 self.undefined_bank[2] = self.registers[13];
             }
             Mode::Irq => {
-                self.irq_bank[0] = _spsr;
+                self.irq_bank[0] = self.spsr;
                 self.irq_bank[1] = self.registers[14];
                 self.irq_bank[2] = self.registers[13];
             }
             Mode::Fiq => {
-                self.fiq_bank[0] = _spsr;
+                self.fiq_bank[0] = self.spsr;
                 self.fiq_bank[1] = self.registers[14];
                 self.fiq_bank[2] = self.registers[13];
 
@@ -258,27 +258,27 @@ impl Cpu {
                 self.registers[13] = self.user_system_bank[1];
             },
             Mode::Supervisor => {
-                _spsr              = self.supervisor_bank[0];
+                self.spsr          = self.supervisor_bank[0];
                 self.registers[14] = self.supervisor_bank[1];
                 self.registers[13] = self.supervisor_bank[2];
             }
             Mode::Abort => {
-                _spsr              = self.abort_bank[0];
+                self.spsr          = self.abort_bank[0];
                 self.registers[14] = self.abort_bank[1];
                 self.registers[13] = self.abort_bank[2];
             }
             Mode::Undefined => {
-                _spsr              = self.undefined_bank[0];
+                self.spsr          = self.undefined_bank[0];
                 self.registers[14] = self.undefined_bank[1];
                 self.registers[13] = self.undefined_bank[2];
             }
             Mode::Irq => {
-                _spsr              = self.irq_bank[0];
+                self.spsr          = self.irq_bank[0];
                 self.registers[14] = self.irq_bank[1];
                 self.registers[13] = self.irq_bank[2];
             }
             Mode::Fiq => {
-                _spsr              = self.fiq_bank[0];
+                self.spsr          = self.fiq_bank[0];
                 self.registers[14] = self.fiq_bank[1];
                 self.registers[13] = self.fiq_bank[2];
 
@@ -291,6 +291,47 @@ impl Cpu {
         };
 
         self.mode = mode;
+    }
+
+    fn maybe_change_mode(&mut self, mode: Mode) {
+        if self.mode != mode {
+            self.change_mode(mode);
+        }
+    }
+
+    /// Build the value of the 32bit CPSR register
+    fn cpsr(&self) -> u32 {
+        let mut r = 0u32;
+
+        r |= self.mode as u32;
+        r |= (self.thumb as u32) << 5;
+        r |= ((!self.fiq_en) as u32) << 6;
+        r |= ((!self.irq_en) as u32) << 7;
+
+        r |= (self.v as u32) << 28;
+        r |= (self.c as u32) << 29;
+        r |= (self.z as u32) << 30;
+        r |= (self.n as u32) << 31;
+
+        r
+    }
+
+    /// Software interrupt, also called "SVC" (supervisor call) in
+    /// modern ARM architectures.
+    fn swi(&mut self) {
+        let ra = self.next_pc;
+        let spsr = self.cpsr();
+
+        self.thumb = false;
+        self.irq_en = false;
+
+        self.maybe_change_mode(Mode::Supervisor);
+
+        self.spsr = spsr;
+        self.set_reg(RegisterIndex(14), ra);
+
+        // Jump to SWI vector
+        self.set_pc(0x8)
     }
 
     fn msr_cpsr(&mut self, val: u32, field_mask: u32) {
@@ -318,8 +359,8 @@ impl Cpu {
                 panic!("Attempted to switch to Thumb mode in MSR");
             }
 
-            self.fiq_en = (val & 0x40) != 0;
-            self.irq_en = (val & 0x80) != 0;
+            self.fiq_en = (val & 0x40) == 0;
+            self.irq_en = (val & 0x80) == 0;
         }
 
         if (field_mask & 8) != 0 {
@@ -402,6 +443,10 @@ impl fmt::Debug for Cpu {
                       flag(self.fiq_en, 'F'),
                       is));
 
+        if self.mode.has_spsr() {
+            try!(writeln!(f, "SPSR: {:08x}", self.spsr));
+        }
+
         for i in 0..10 {
             try!(write!(f, "R{}:  0x{:08x}", i, self.registers[i]));
 
@@ -473,5 +518,9 @@ impl Mode {
 
     fn is_privileged(self) -> bool {
         self != Mode::User
+    }
+
+    fn has_spsr(self) -> bool {
+        self != Mode::User && self != Mode::System
     }
 }
