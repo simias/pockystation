@@ -29,6 +29,12 @@ impl Instruction {
         RegisterIndex(r as u32)
     }
 
+    fn reg_6(self) -> RegisterIndex {
+        let r = (self.0 >> 6) & 7;
+
+        RegisterIndex(r as u32)
+    }
+
     fn reg_8(self) -> RegisterIndex {
         let r = (self.0 >> 8) & 7;
 
@@ -107,6 +113,7 @@ impl Instruction {
             0x118...0x11b => self.op118_cpy(cpu),
             0x11c | 0x11d => self.op11c_bx(cpu),
             0x120...0x13f => self.op12x_ldr_pc(cpu),
+            0x160...0x167 => self.op16x_ldr_rr(cpu),
             0x180...0x19f => self.op18x_str_ri5(cpu),
             0x1a0...0x1bf => self.op1ax_ldr_ri5(cpu),
             0x1c0...0x1df => self.op1cx_strb_ri5(cpu),
@@ -445,6 +452,18 @@ impl Instruction {
         let base = cpu.reg(RegisterIndex(15)) & !3;
 
         let addr = base.wrapping_add(offset);
+
+        let val = cpu.load32(addr);
+
+        cpu.set_reg(rd, val);
+    }
+
+    fn op16x_ldr_rr(self, cpu: &mut Cpu) {
+        let rd = self.reg_0();
+        let rn = self.reg_3();
+        let rm = self.reg_6();
+
+        let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
 
         let val = cpu.load32(addr);
 

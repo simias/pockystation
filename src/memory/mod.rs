@@ -58,6 +58,15 @@ impl Interconnect {
                     0x308 => 0xca1,
                     _ => unimplemented(),
                 },
+            0x08 =>
+                match offset {
+                    0 => {
+                        println!("FLASH PHYS read");
+                        // "MC\0\0"
+                        0x0000434d
+                    }
+                    _ => unimplemented(),
+                },
             0x0a =>
                 match offset {
                     // INT_LATCH
