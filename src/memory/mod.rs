@@ -4,6 +4,7 @@ use irda::Irda;
 
 pub struct Interconnect {
     kernel: Box<[u8; KERNEL_SIZE]>,
+    flash: Box<[u8; FLASH_SIZE]>,
     ram: Box<[u8; RAM_SIZE]>,
     /// When true the kernel is mirrored at address 0. Set on reset so
     /// that the reset vector starts executing from the kernel.
@@ -14,8 +15,9 @@ pub struct Interconnect {
 }
 
 impl Interconnect {
-    pub fn new(kernel: Vec<u8>) -> Interconnect {
+    pub fn new(kernel: Vec<u8>, flash: Vec<u8>) -> Interconnect {
         assert!(kernel.len() == KERNEL_SIZE);
+        assert!(flash.len() == FLASH_SIZE);
 
         let mut kernel_array = box_array![0; KERNEL_SIZE];
 
@@ -23,8 +25,15 @@ impl Interconnect {
             *a = v;
         }
 
+        let mut flash_array = box_array![0; FLASH_SIZE];
+
+        for (a, &v) in flash_array.iter_mut().zip(&flash) {
+            *a = v;
+        }
+
         Interconnect {
             kernel: kernel_array,
+            flash: flash_array,
             ram: box_array![0xca; RAM_SIZE],
             kernel_at_0: true,
             lcd: Lcd::new(),
@@ -58,15 +67,7 @@ impl Interconnect {
                     0x308 => 0xca1,
                     _ => unimplemented(),
                 },
-            0x08 =>
-                match offset {
-                    0 => {
-                        println!("FLASH PHYS read");
-                        // "MC\0\0"
-                        0x0000434d
-                    }
-                    _ => unimplemented(),
-                },
+            0x08 => self.read_flash::<A>(offset),
             0x0a =>
                 match offset {
                     // INT_LATCH
@@ -186,6 +187,20 @@ impl Interconnect {
         r
     }
 
+    fn read_flash<A: Addressable>(&self, offset: u32) -> u32 {
+        let offset = offset as usize;
+
+        println!("FLASH read {:x}", offset);
+
+        let mut r = 0;
+
+        for i in 0..A::size() as usize {
+            r |= (self.flash[offset + i] as u32) << (8 * i)
+        }
+
+        r
+    }
+
     fn read_ram<A: Addressable>(&self, offset: u32) -> u32 {
         let offset = offset as usize;
 
@@ -255,3 +270,6 @@ const KERNEL_SIZE: usize = 16 * 1024;
 
 /// RAM size in bytes
 const RAM_SIZE: usize = 2 * 1024;
+
+/// FLASH size in bytes
+const FLASH_SIZE: usize = 128 * 1024;

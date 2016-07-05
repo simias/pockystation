@@ -19,7 +19,13 @@ fn main() {
 
     kernel.read_to_end(&mut kernel_data).unwrap();
 
-    let inter = memory::Interconnect::new(kernel_data);
+    let mut flash = File::open(&args[2]).unwrap();
+
+    let mut flash_data = Vec::new();
+
+    flash.read_to_end(&mut flash_data).unwrap();
+
+    let inter = memory::Interconnect::new(kernel_data, flash_data);
 
     let mut cpu = cpu::Cpu::new(inter);
 
