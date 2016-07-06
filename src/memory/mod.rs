@@ -72,8 +72,8 @@ impl Interconnect {
                 match offset {
                     // INT_LATCH
                     0 => 0,
-                    // INT_INPUT
-                    4 => 0,
+                    // INT_INPUT (return RTC toggle for bootup)
+                    4 => 1 << 9,
                     // INT_MASK
                     8 => 0,
                     _ => unimplemented(),
@@ -82,6 +82,12 @@ impl Interconnect {
                 match offset {
                     // CLK MODE: reply that the clock is ready (locked?)
                     0 => 0x10,
+                    // RTC TIME
+                    0x800008 => 0x01000000,
+                    // RTC_DATE (kernel init deadlocks if we return
+                    // any other value, it tries to reset it to this
+                    // value and loops until it gets it)
+                    0x80000c => 0x00990101,
                     _ => unimplemented(),
                 },
             0x0c =>
@@ -148,6 +154,7 @@ impl Interconnect {
                 match offset {
                     0 => println!("CLK MODE 0x{:08x}", val),
                     0x800000 => println!("RTC MODE 0x{:08x}", val),
+                    0x800004 => println!("RTC ADJ 0x{:08x}", val),
                     _ => unimplemented(),
                 },
             0x0c =>

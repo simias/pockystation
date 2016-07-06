@@ -401,6 +401,16 @@ impl Cpu {
         }
     }
 
+    fn load32(&mut self, addr: u32) -> u32 {
+        if addr & 3 != 0 {
+            panic!("Unaligned load32! 0x{:08x} {:?}", addr, self);
+        }
+
+        println!("load32 {:08x}", addr);
+
+        self.inter.load::<Word>(addr)
+    }
+
     fn load16(&mut self, addr: u32) -> u16 {
         if addr & 1 != 0 {
             panic!("Unaligned load16! 0x{:08x} {:?}", addr, self);
@@ -411,14 +421,10 @@ impl Cpu {
         self.inter.load::<HalfWord>(addr) as u16
     }
 
-    fn load32(&mut self, addr: u32) -> u32 {
-        if addr & 3 != 0 {
-            panic!("Unaligned load32! 0x{:08x} {:?}", addr, self);
-        }
+    fn load8(&mut self, addr: u32) -> u8 {
+        println!("load8 {:08x}", addr);
 
-        println!("load32 {:08x}", addr);
-
-        self.inter.load::<Word>(addr)
+        self.inter.load::<Byte>(addr) as u8
     }
 
     fn store32(&mut self, addr: u32, val: u32) {
