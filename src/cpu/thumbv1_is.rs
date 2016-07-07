@@ -48,7 +48,7 @@ impl Instruction {
     }
 
     fn rd_full(self) -> RegisterIndex {
-        let lo = (self.0 & 0x1f) as u32;
+        let lo = (self.0 & 0x7) as u32;
         let hi = ((self.0 >> 7) & 1) as u32;
 
         RegisterIndex((hi << 3) | lo)
@@ -532,6 +532,14 @@ impl Instruction {
         let rd = self.rd_full();
 
         let val = cpu.reg(rm);
+
+
+        let val =
+            if rd.is_pc() {
+                val & !1
+            } else {
+                val
+            };
 
         cpu.set_reg(rd, val);
     }

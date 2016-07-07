@@ -224,6 +224,7 @@ impl Instruction {
             0x1cb         => self.op1cb_strh_pui(cpu),
             0x1db         => self.op1db_ldrh_pui(cpu),
             0x200...0x20f => self.op20x_and_i(cpu),
+            0x210...0x21f => self.op21x_and_is(cpu),
             0x240...0x24f => self.op24x_sub_i(cpu),
             0x280...0x28f => self.op28x_add_i(cpu),
             0x310...0x31f => self.op31x_tst_i(cpu),
@@ -384,6 +385,27 @@ impl Instruction {
         let val = a & b;
 
         cpu.set_reg(dst, val);
+    }
+
+    fn op21x_and_is(self, cpu: &mut Cpu) {
+        let dst        = self.rd();
+        let rn         = self.rn();
+        let (b, carry) = self.mode1_imm(cpu);
+
+        if dst.is_pc() {
+            // Should put CPSR in SPSR for some reason
+            panic!("Unimplemented AND {}", self);
+        }
+
+        let a = cpu.reg(rn);
+
+        let val = a & b;
+
+        cpu.set_reg(dst, val);
+
+        cpu.set_n((val as i32) < 0);
+        cpu.set_z(val == 0);
+        cpu.set_c(carry);
     }
 
     fn op24x_sub_i(self, cpu: &mut Cpu) {
