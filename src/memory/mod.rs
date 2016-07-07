@@ -1,17 +1,22 @@
+use interrupt::IrqController;
 use lcd::Lcd;
 use dac::Dac;
 use irda::Irda;
+use rtc::Rtc;
 
 pub struct Interconnect {
     kernel: Box<[u8; KERNEL_SIZE]>,
     flash: Box<[u8; FLASH_SIZE]>,
-    ram: Box<[u8; RAM_SIZE]>,
     /// When true the kernel is mirrored at address 0. Set on reset so
     /// that the reset vector starts executing from the kernel.
     kernel_at_0: bool,
+    ram: Box<[u8; RAM_SIZE]>,
+    irq_controller: IrqController,
+    rtc: Rtc,
     lcd: Lcd,
     dac: Dac,
     irda: Irda,
+    cpu_clk_div: u8,
 }
 
 impl Interconnect {
@@ -34,12 +39,25 @@ impl Interconnect {
         Interconnect {
             kernel: kernel_array,
             flash: flash_array,
-            ram: box_array![0xca; RAM_SIZE],
             kernel_at_0: true,
+            ram: box_array![0xca; RAM_SIZE],
+            irq_controller: IrqController::new(),
+            rtc: Rtc::new(),
             lcd: Lcd::new(),
             dac: Dac::new(),
             irda: Irda::new(),
+            cpu_clk_div: 7,
         }
+    }
+
+    pub fn irq_pending(&self) -> bool {
+        self.irq_controller.irq_pending()
+    }
+
+    pub fn tick(&mut self, cpu_ticks: u32) {
+        let master_ticks = cpu_ticks << self.cpu_clk_div;
+
+        self.rtc.tick(&mut self.irq_controller, cpu_ticks, master_ticks);
     }
 
     pub fn load<A: Addressable>(&self, addr: u32) -> u32 {
@@ -70,12 +88,7 @@ impl Interconnect {
             0x08 => self.read_flash::<A>(offset),
             0x0a =>
                 match offset {
-                    // INT_LATCH
-                    0 => 0,
-                    // INT_INPUT (return RTC toggle for bootup)
-                    4 => 1 << 9,
-                    // INT_MASK
-                    8 => 0,
+                    0x00...0x10 => self.irq_controller.load::<A>(offset),
                     _ => unimplemented(),
                 },
             0x0b =>
@@ -139,9 +152,7 @@ impl Interconnect {
                 },
             0x0a =>
                 match offset {
-                    0x0c => println!("INT MASK CLR 0x{:08x}", val),
-                    0x08 => println!("INT MASK SET 0x{:08x}", val),
-                    0x10 => println!("INT ACK 0x{:08x}", val),
+                    0x00...0x10 => self.irq_controller.store::<A>(offset, val),
                     0x800000 => println!("T0 RELOAD 0x{:08x}", val),
                     0x800008 => println!("T0 MODE 0x{:08x}", val),
                     0x800010 => println!("T1 RELOAD 0x{:08x}", val),
@@ -152,7 +163,7 @@ impl Interconnect {
                 },
             0x0b =>
                 match offset {
-                    0 => println!("CLK MODE 0x{:08x}", val),
+                    0 => self.cpu_clk_div = 7 - (val & 0x7) as u8,
                     0x800000 => println!("RTC MODE 0x{:08x}", val),
                     0x800004 => println!("RTC ADJ 0x{:08x}", val),
                     _ => unimplemented(),

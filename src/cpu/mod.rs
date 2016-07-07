@@ -84,6 +84,16 @@ impl Cpu {
     pub fn run_next_instruction(&mut self) {
         println!("{:?}", self);
 
+        // Assume each instruction takes exactly one CPU cycle for
+        // now, a gross oversimplification...
+        self.inter.tick(1);
+
+        // XXX handle FIQs
+
+        if self.irq_en && self.inter.irq_pending() {
+            self.irq();
+        }
+
         let pc = self.next_pc;
 
         self.next_pc = self.registers[15];
@@ -207,7 +217,7 @@ impl Cpu {
     fn set_pc_cpsr(&mut self, pc: u32, cpsr: u32) {
         let mode = Mode::from_field(cpsr & 0x1f);
 
-        self.maybe_change_mode(mode);
+        self.change_mode(mode);
 
         self.thumb = (cpsr & 0x20) != 0;
 
@@ -227,7 +237,9 @@ impl Cpu {
     fn change_mode(&mut self, mode: Mode) {
         // The FIQ banking code assumes we can't bank to the same
         // mode, otherwise the non-FIQ R8-R14 could be lost.
-        assert!(self.mode != mode);
+        if self.mode == mode {
+            return;
+        }
 
         // First save the current mode's banked registers
         match self.mode {
@@ -313,12 +325,6 @@ impl Cpu {
         self.mode = mode;
     }
 
-    fn maybe_change_mode(&mut self, mode: Mode) {
-        if self.mode != mode {
-            self.change_mode(mode);
-        }
-    }
-
     /// Build the value of the 32bit CPSR register
     fn cpsr(&self) -> u32 {
         let mut r = 0u32;
@@ -354,13 +360,30 @@ impl Cpu {
         self.thumb = false;
         self.irq_en = false;
 
-        self.maybe_change_mode(Mode::Supervisor);
+        self.change_mode(Mode::Supervisor);
 
         self.spsr = spsr;
         self.set_reg(RegisterIndex(14), ra);
 
         // Jump to SWI vector
         self.set_pc(0x8)
+    }
+
+    /// Interrupt request
+    fn irq(&mut self) {
+        let ra = self.next_pc;
+        let spsr = self.cpsr();
+
+        self.thumb = false;
+        self.irq_en = false;
+
+        self.change_mode(Mode::Irq);
+
+        self.spsr = spsr;
+        self.set_reg(RegisterIndex(14), ra);
+
+        // Jump to IRQ vector
+        self.set_pc(0x18)
     }
 
     fn msr_cpsr(&mut self, val: u32, field_mask: u32) {
@@ -376,7 +399,7 @@ impl Cpu {
             // Set control bits
             let mode = Mode::from_field((val & 0xf) | 0x10);
 
-            self.maybe_change_mode(mode);
+            self.change_mode(mode);
 
             let thumb = (val & 0x20) != 0;
 
