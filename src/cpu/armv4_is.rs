@@ -298,8 +298,6 @@ impl Instruction {
 
         let target = cpu.reg(rm);
 
-        println!("BX 0x{:08x}", target);
-
         // If bit 0 of the target is set we switch to Thumb mode
         let thumb = (target & 1) != 0;
         let address = target & !1;

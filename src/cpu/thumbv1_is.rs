@@ -137,6 +137,7 @@ impl Instruction {
             0x0c0...0x0df => self.op0cx_add_i8(cpu),
             0x0e0...0x0ff => self.op0ex_sub_i8(cpu),
             0x100         => self.op100_and(cpu),
+            0x101         => self.op101_eor(cpu),
             0x102         => self.op102_lsl_r(cpu),
             0x103         => self.op103_lsr_r(cpu),
             0x108         => self.op108_tst(cpu),
@@ -147,6 +148,7 @@ impl Instruction {
             0x118...0x11b => self.op118_cpy(cpu),
             0x11c | 0x11d => self.op11c_bx(cpu),
             0x120...0x13f => self.op12x_ldr_pc(cpu),
+            0x140...0x147 => self.op14x_str_rr(cpu),
             0x160...0x167 => self.op16x_ldr_rr(cpu),
             0x178...0x17f => self.op17x_ldrsh_rr(cpu),
             0x180...0x19f => self.op18x_str_ri5(cpu),
@@ -157,6 +159,7 @@ impl Instruction {
             0x220...0x23f => self.op22x_ldrh_ri5(cpu),
             0x240...0x25f => self.op24x_str_sp(cpu),
             0x260...0x27f => self.op26x_ldr_sp(cpu),
+            0x280...0x29f => self.op28x_add_pc(cpu),
             0x2c0...0x2c1 => self.op2c0_add_sp(cpu),
             0x2c2...0x2c3 => self.op2c2_sub_sp(cpu),
             0x2d0...0x2d3 => self.op2d0_push(cpu),
@@ -167,9 +170,12 @@ impl Instruction {
             0x344...0x347 => self.op344_bne(cpu),
             0x348...0x34b => self.op348_bcs(cpu),
             0x34c...0x34f => self.op34c_bcc(cpu),
+            0x354...0x357 => self.op354_bpl(cpu),
+            0x360...0x363 => self.op360_bhi(cpu),
             0x368...0x36b => self.op368_bge(cpu),
             0x36c...0x36f => self.op36c_blt(cpu),
             0x370...0x373 => self.op370_bgt(cpu),
+            0x374...0x377 => self.op374_ble(cpu),
             0x37c...0x37f => self.op37c_swi(cpu),
             0x380...0x39f => self.op38x_b(cpu),
             0x3c0...0x3df => self.op3cx_bl_hi(cpu),
@@ -178,8 +184,9 @@ impl Instruction {
         }
     }
 
-    fn unimplemented(self, _: &mut Cpu) {
-        panic!("Unimplemented instruction {} ({:03x})",
+    fn unimplemented(self, cpu: &mut Cpu) {
+        panic!("{:?}Unimplemented instruction {} ({:03x})",
+               cpu,
                self,
                self.opcode());
     }
@@ -363,6 +370,20 @@ impl Instruction {
         let b = cpu.reg(rm);
 
         let val = a & b;
+
+        cpu.set_reg(rd, val);
+        cpu.set_n((val as i32) < 0);
+        cpu.set_z(val == 0);
+    }
+
+    fn op101_eor(self, cpu: &mut Cpu) {
+        let rd = self.reg_0();
+        let rm = self.reg_3();
+
+        let a = cpu.reg(rd);
+        let b = cpu.reg(rm);
+
+        let val = a ^ b;
 
         cpu.set_reg(rd, val);
         cpu.set_n((val as i32) < 0);
@@ -555,6 +576,18 @@ impl Instruction {
         let val = cpu.load32(addr);
 
         cpu.set_reg(rd, val);
+    }
+
+    fn op14x_str_rr(self, cpu: &mut Cpu) {
+        let rd = self.reg_0();
+        let rn = self.reg_3();
+        let rm = self.reg_6();
+
+        let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
+
+        let val = cpu.reg(rd);
+
+        cpu.store32(addr, val);
     }
 
     fn op16x_ldr_rr(self, cpu: &mut Cpu) {
@@ -753,6 +786,26 @@ impl Instruction {
         }
     }
 
+    fn op354_bpl(self, cpu: &mut Cpu) {
+        let offset = self.signed_imm8() << 1;
+
+        if !cpu.n() {
+            let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
+
+            cpu.set_pc(pc);
+        }
+    }
+
+    fn op360_bhi(self, cpu: &mut Cpu) {
+        let offset = self.signed_imm8() << 1;
+
+        if cpu.c() && !cpu.z() {
+            let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
+
+            cpu.set_pc(pc);
+        }
+    }
+
     fn op368_bge(self, cpu: &mut Cpu) {
         let offset = self.signed_imm8() << 1;
 
@@ -777,6 +830,16 @@ impl Instruction {
         let offset = self.signed_imm8() << 1;
 
         if !cpu.z() && (cpu.n() == cpu.v()) {
+            let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
+
+            cpu.set_pc(pc);
+        }
+    }
+
+    fn op374_ble(self, cpu: &mut Cpu) {
+        let offset = self.signed_imm8() << 1;
+
+        if cpu.z() || (cpu.n() != cpu.v()) {
             let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
 
             cpu.set_pc(pc);
@@ -885,6 +948,17 @@ impl Instruction {
         let val = cpu.load32(addr);
 
         cpu.set_reg(rd, val);
+    }
+
+    fn op28x_add_pc(self, cpu: &mut Cpu) {
+        let rd  = self.reg_8();
+        let offset = self.imm8() << 2;
+
+        let pc = RegisterIndex(15);
+
+        let val = cpu.reg(pc).wrapping_add(offset);
+
+        cpu.set_reg(rd, val & !3);
     }
 
     fn op2c0_add_sp(self, cpu: &mut Cpu) {

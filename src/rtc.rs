@@ -190,4 +190,4 @@ impl fmt::Display for Bcd {
     }
 }
 
-const MASTER_DIVIDER: u32 = MASTER_CLOCK_HZ / 200;
+const MASTER_DIVIDER: u32 = MASTER_CLOCK_HZ / 2;

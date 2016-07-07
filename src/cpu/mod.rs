@@ -82,11 +82,9 @@ impl Cpu {
     }
 
     pub fn run_next_instruction(&mut self) {
-        println!("{:?}", self);
-
         // Assume each instruction takes exactly one CPU cycle for
         // now, a gross oversimplification...
-        self.inter.tick(1);
+        self.inter.tick(2);
 
         // XXX handle FIQs
 
@@ -110,8 +108,6 @@ impl Cpu {
 
             let instruction = self.load16(pc);
 
-            println!("Executing 0x{:04x}", instruction);
-
             thumbv1_is::execute(self, instruction);
 
         } else {
@@ -127,8 +123,6 @@ impl Cpu {
             }
 
             let instruction = self.load32(pc);
-
-            println!("Executing 0x{:08x}", instruction);
 
             armv4_is::execute(self, instruction);
         }
@@ -371,7 +365,7 @@ impl Cpu {
 
     /// Interrupt request
     fn irq(&mut self) {
-        let ra = self.next_pc;
+        let ra = self.next_pc + 4;
         let spsr = self.cpsr();
 
         self.thumb = false;
@@ -429,8 +423,6 @@ impl Cpu {
             panic!("Unaligned load32! 0x{:08x} {:?}", addr, self);
         }
 
-        println!("load32 {:08x}", addr);
-
         self.inter.load::<Word>(addr)
     }
 
@@ -439,14 +431,10 @@ impl Cpu {
             panic!("Unaligned load16! 0x{:08x} {:?}", addr, self);
         }
 
-        println!("load16 {:08x}", addr);
-
         self.inter.load::<HalfWord>(addr) as u16
     }
 
     fn load8(&mut self, addr: u32) -> u8 {
-        println!("load8 {:08x}", addr);
-
         self.inter.load::<Byte>(addr) as u8
     }
 
@@ -454,8 +442,6 @@ impl Cpu {
         if addr & 3 != 0 {
             panic!("Unaligned store32! 0x{:08x} {:?}", addr, self);
         }
-
-        println!("store32 0x{:08x} @ 0x{:08x}", val, addr);
 
         self.inter.store::<Word>(addr, val);
     }
@@ -465,14 +451,10 @@ impl Cpu {
             panic!("Unaligned store16! 0x{:08x} {:?}", addr, self);
         }
 
-        println!("store16 0x{:08x} @ 0x{:08x}", val, addr);
-
         self.inter.store::<HalfWord>(addr, val);
     }
 
     fn store8(&mut self, addr: u32, val: u32) {
-        println!("store8 0x{:08x} @ 0x{:08x}", val, addr);
-
         self.inter.store::<Byte>(addr, val);
     }
 }
