@@ -29,8 +29,6 @@ impl Lcd {
                 let i = (offset & 0x7f) as usize;
 
                 self.fb[i / 4] = val;
-
-                self.draw();
             }
             _ => panic!("Unhandled LCD register {:x}", offset),
         }
@@ -53,7 +51,7 @@ impl Lcd {
         }
     }
 
-    fn draw(&self) {
+    pub fn draw(&self) {
         println!("----------------------------------");
 
         for &w in &self.fb {

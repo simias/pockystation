@@ -1,8 +1,11 @@
-use interrupt::IrqController;
+use interrupt::{Interrupt, IrqController};
 use lcd::Lcd;
 use dac::Dac;
 use irda::Irda;
 use rtc::Rtc;
+use timer::Timer;
+
+use MASTER_CLOCK_HZ;
 
 pub struct Interconnect {
     kernel: Box<[u8; KERNEL_SIZE]>,
@@ -12,11 +15,13 @@ pub struct Interconnect {
     kernel_at_0: bool,
     ram: Box<[u8; RAM_SIZE]>,
     irq_controller: IrqController,
+    timers: [Timer; 3],
     rtc: Rtc,
     lcd: Lcd,
     dac: Dac,
     irda: Irda,
     cpu_clk_div: u8,
+    frame_ticks: u32,
 }
 
 impl Interconnect {
@@ -42,11 +47,15 @@ impl Interconnect {
             kernel_at_0: true,
             ram: box_array![0xca; RAM_SIZE],
             irq_controller: IrqController::new(),
+            timers: [Timer::new(Interrupt::Timer0),
+                     Timer::new(Interrupt::Timer1),
+                     Timer::new(Interrupt::Timer2),],
             rtc: Rtc::new(),
             lcd: Lcd::new(),
             dac: Dac::new(),
             irda: Irda::new(),
             cpu_clk_div: 7,
+            frame_ticks: 0,
         }
     }
 
@@ -58,6 +67,17 @@ impl Interconnect {
         let master_ticks = cpu_ticks << self.cpu_clk_div;
 
         self.rtc.tick(&mut self.irq_controller, cpu_ticks, master_ticks);
+
+        self.timers[0].tick(&mut self.irq_controller, cpu_ticks, master_ticks);
+        self.timers[1].tick(&mut self.irq_controller, cpu_ticks, master_ticks);
+        self.timers[2].tick(&mut self.irq_controller, cpu_ticks, master_ticks);
+
+        self.frame_ticks += master_ticks;
+
+        if self.frame_ticks > MASTER_CLOCK_HZ / 60 {
+            self.frame_ticks = 0;
+            self.lcd.draw();
+        }
     }
 
     pub fn load<A: Addressable>(&self, addr: u32) -> u32 {
@@ -81,7 +101,8 @@ impl Interconnect {
             0x04 => self.read_kernel::<A>(offset),
             0x06 =>
                 match offset {
-                    // F_CAL. Need to dump a value from a real PocketStation.
+                    // F_CAL. XXX Need to dump a value from a real
+                    // PocketStation.
                     0x308 => 0xca1,
                     _ => unimplemented(),
                 },
@@ -89,6 +110,11 @@ impl Interconnect {
             0x0a =>
                 match offset {
                     0x00...0x10 => self.irq_controller.load::<A>(offset),
+                    0x800000...0x800028 => {
+                        let timer = (offset >> 8) & 3;
+
+                        self.timers[timer as usize].load::<A>(offset & 0xf)
+                    }
                     _ => unimplemented(),
                 },
             0x0b =>
@@ -153,12 +179,11 @@ impl Interconnect {
             0x0a =>
                 match offset {
                     0x00...0x10 => self.irq_controller.store::<A>(offset, val),
-                    0x800000 => println!("T0 RELOAD 0x{:08x}", val),
-                    0x800008 => println!("T0 MODE 0x{:08x}", val),
-                    0x800010 => println!("T1 RELOAD 0x{:08x}", val),
-                    0x800018 => println!("T1 MODE 0x{:08x}", val),
-                    0x800020 => println!("T2 RELOAD 0x{:08x}", val),
-                    0x800028 => println!("T1 MODE 0x{:08x}", val),
+                    0x800000...0x800028 => {
+                        let timer = (offset >> 8) & 3;
+
+                        self.timers[timer as usize].store::<A>(offset & 0xf, val);
+                    }
                     _ => unimplemented(),
                 },
             0x0b =>

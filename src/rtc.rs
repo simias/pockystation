@@ -52,7 +52,7 @@ impl Rtc {
         }
 
         while master_ticks > 0 {
-            if self.divider > master_ticks {
+            if self.divider >= master_ticks {
                 self.divider -= master_ticks;
 
                 master_ticks = 0;

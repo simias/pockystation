@@ -70,14 +70,14 @@ impl IrqController {
     /// Return the raw level of an interrupt, latching it if it goes
     /// through a rising edge.
     pub fn set_raw_interrupt(&mut self, irq: Interrupt, level: bool) {
-        println!("set raw interrupt! {:?} {}", irq, level);
-
         let mask = 1 << (irq as u16);
 
         if level == true {
             if !self.raw_interrupt(irq) {
                 // Rising edge
                 self.latch |= mask;
+
+                println!("Interrupt! {:?} {}", irq, level);
             }
 
             self.raw |= mask;

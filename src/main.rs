@@ -11,6 +11,7 @@ mod dac;
 mod irda;
 mod lcd;
 mod rtc;
+mod timer;
 
 fn main() {
     let args: Vec<_> = ::std::env::args().collect();
