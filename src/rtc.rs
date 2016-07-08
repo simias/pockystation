@@ -66,6 +66,7 @@ impl Rtc {
 
                 if level == true {
                     self.second_elapsed();
+                    println!("RTC: {:?}", self);
                 }
 
                 irq.set_raw_interrupt(Interrupt::Rtc, level);
@@ -138,6 +139,17 @@ impl Rtc {
         }
     }
 }
+
+impl fmt::Debug for Rtc {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}/{}/{} {}:{}:{}",
+               self.year, self.month, self.day,
+               self.hours,
+               self.minutes,
+               self.seconds)
+    }
+}
+
 
 /// A single packed BCD value in the range 0-99 (2 digits, 4bits per
 /// digit).
