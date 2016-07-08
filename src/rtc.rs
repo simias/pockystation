@@ -1,6 +1,7 @@
 use std::fmt;
 
 use interrupt::{IrqController, Interrupt};
+use memory::Addressable;
 
 use MASTER_CLOCK_HZ;
 
@@ -23,6 +24,9 @@ pub struct Rtc {
     month: Bcd,
     /// Year: [00..99]
     year: Bcd,
+    /// Value to be adjusted when writing to ADJUST register, see the
+    /// `adjust` function for its meaning
+    adjust: u8,
 }
 
 impl Rtc {
@@ -37,6 +41,7 @@ impl Rtc {
             day: Bcd::one(),
             month: Bcd::one(),
             year: Bcd::from_bcd(0x99).unwrap(),
+            adjust: 0,
         }
     }
 
@@ -44,12 +49,6 @@ impl Rtc {
                 irq: &mut IrqController,
                 _cpu_ticks: u32,
                 mut master_ticks: u32) {
-
-        if self.paused {
-            // XXX Does the interrupt signal still toggle when we're
-            // paused?
-            return;
-        }
 
         while master_ticks > 0 {
             if self.divider >= master_ticks {
@@ -65,13 +64,55 @@ impl Rtc {
                 let level = !irq.raw_interrupt(Interrupt::Rtc);
 
                 if level == true {
-                    self.second_elapsed();
-                    println!("RTC: {:?}", self);
+                    // XXX Not sure how the paused bit is handled
+                    if !self.paused {
+                        self.second_elapsed();
+                        println!("RTC: {:?}", self);
+                    }
                 }
 
                 irq.set_raw_interrupt(Interrupt::Rtc, level);
             }
         }
+    }
+
+    pub fn store<A: Addressable>(&mut self, offset: u32, val: u32) {
+        match offset {
+            0 => self.set_mode(val),
+            _ => panic!("Unhandled RTC register {:x}", offset),
+        }
+    }
+
+    pub fn load<A: Addressable>(&self, offset: u32) -> u32 {
+        match offset {
+            0x8 => self.time(),
+            0xc => self.date(),
+            _ => panic!("Unhandled RTC register {:x}", offset),
+        }
+    }
+
+    fn time(&self) -> u32 {
+        let seconds = self.seconds.bcd() as u32;
+        let minutes = self.minutes.bcd() as u32;
+        let hours = self.hours.bcd() as u32;
+        let week_day = self.week_day.bcd() as u32;
+
+        seconds | (minutes << 8) | (hours << 16) | (week_day << 24)
+    }
+
+    fn date(&self) -> u32 {
+        let day = self.day.bcd() as u32;
+        let month = self.month.bcd() as u32;
+        let year = self.year.bcd() as u32;
+
+        // XXX What is the high byte exactly?
+        day | (month << 8) | (year << 16)
+    }
+
+    fn set_mode(&mut self, val: u32) {
+        self.paused = (val & 1) != 0;
+
+        self.adjust = ((val >> 1) & 7) as u8;
     }
 
     fn second_elapsed(&mut self) {

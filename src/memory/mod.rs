@@ -121,12 +121,7 @@ impl Interconnect {
                 match offset {
                     // CLK MODE: reply that the clock is ready (locked?)
                     0 => 0x10,
-                    // RTC TIME
-                    0x800008 => 0x01000000,
-                    // RTC_DATE (kernel init deadlocks if we return
-                    // any other value, it tries to reset it to this
-                    // value and loops until it gets it)
-                    0x80000c => 0x00990101,
+                    0x800000...0x80000c => self.rtc.load::<A>(offset & 0xf),
                     _ => unimplemented(),
                 },
             0x0c =>
@@ -182,15 +177,16 @@ impl Interconnect {
                     0x800000...0x800028 => {
                         let timer = (offset >> 8) & 3;
 
-                        self.timers[timer as usize].store::<A>(offset & 0xf, val);
+                        self.timers[timer as usize].store::<A>(offset & 0xf,
+                                                               val);
                     }
                     _ => unimplemented(),
                 },
             0x0b =>
                 match offset {
                     0 => self.cpu_clk_div = 7 - (val & 0x7) as u8,
-                    0x800000 => println!("RTC MODE 0x{:08x}", val),
-                    0x800004 => println!("RTC ADJ 0x{:08x}", val),
+                    0x800000...0x80000c => self.rtc.store::<A>(offset & 0xf,
+                                                               val),
                     _ => unimplemented(),
                 },
             0x0c =>
