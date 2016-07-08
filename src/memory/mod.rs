@@ -25,19 +25,19 @@ pub struct Interconnect {
 }
 
 impl Interconnect {
-    pub fn new(kernel: Vec<u8>, flash: Vec<u8>) -> Interconnect {
+    pub fn new(kernel: &[u8], flash: &[u8]) -> Interconnect {
         assert!(kernel.len() == KERNEL_SIZE);
         assert!(flash.len() == FLASH_SIZE);
 
         let mut kernel_array = box_array![0; KERNEL_SIZE];
 
-        for (a, &v) in kernel_array.iter_mut().zip(&kernel) {
+        for (a, &v) in kernel_array.iter_mut().zip(kernel) {
             *a = v;
         }
 
         let mut flash_array = box_array![0; FLASH_SIZE];
 
-        for (a, &v) in flash_array.iter_mut().zip(&flash) {
+        for (a, &v) in flash_array.iter_mut().zip(flash) {
             *a = v;
         }
 
