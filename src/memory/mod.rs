@@ -68,6 +68,10 @@ impl Interconnect {
         &self.lcd
     }
 
+    pub fn irq_controller(&mut self) -> &mut IrqController {
+        &mut self.irq_controller
+    }
+
     pub fn irq_controller_mut(&mut self) -> &mut IrqController {
         &mut self.irq_controller
     }

@@ -20,8 +20,17 @@ impl IrqController {
         }
     }
 
+    /// Return true if any interrupt (IRQ or FIQ) is pending
+    pub fn pending(&self) -> bool {
+        (self.latch & self.mask) != 0
+    }
+
     pub fn irq_pending(&self) -> bool {
         (self.latch & self.mask & Interrupt::irq_mask()) != 0
+    }
+
+    pub fn fiq_pending(&self) -> bool {
+        (self.latch & self.mask & Interrupt::fiq_mask()) != 0
     }
 
     pub fn store<A: Addressable>(&mut self, offset: u32, val: u32) {

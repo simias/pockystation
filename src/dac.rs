@@ -30,7 +30,7 @@ impl Dac {
             _ => panic!("Unhandled DAC register {:x}", offset),
         }
 
-        if self.enabled && self.sample != 0{
+        if self.enabled && self.sample != 0 {
             panic!("{}", self.sample);
         }
     }

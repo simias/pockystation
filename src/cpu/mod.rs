@@ -108,10 +108,14 @@ impl Cpu {
         // now, a gross oversimplification...
         self.inter.tick(1);
 
-        // XXX handle FIQs
-
-        if self.irq_en && self.inter.irq_pending() {
-            self.irq();
+        if self.inter.irq_controller().pending() {
+            // FIQs have a high priority than IRQs, so check for them
+            // first
+            if self.fiq_en && self.inter.irq_controller().fiq_pending() {
+                self.fiq();
+            } else if self.irq_en && self.inter.irq_controller().irq_pending() {
+                self.irq();
+            }
         }
 
         let pc = self.next_pc;
@@ -391,6 +395,24 @@ impl Cpu {
 
         // Jump to SWI vector
         self.set_pc(0x8)
+    }
+
+    /// Fast interrupt request
+    fn fiq(&mut self) {
+        let ra = self.next_pc + 4;
+        let spsr = self.cpsr();
+
+        self.thumb = false;
+        self.fiq_en = false;
+        self.irq_en = false;
+
+        self.change_mode(Mode::Fiq);
+
+        self.spsr = spsr;
+        self.set_reg(RegisterIndex(14), ra);
+
+        // Jump to FIQ vector
+        self.set_pc(0x1c)
     }
 
     /// Interrupt request
