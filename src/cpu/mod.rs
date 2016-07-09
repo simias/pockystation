@@ -141,6 +141,10 @@ impl Cpu {
         &self.inter
     }
 
+    pub fn interconnect_mut(&mut self) -> &mut Interconnect {
+        &mut self.inter
+    }
+
     fn n(&self) -> bool {
         self.n
     }

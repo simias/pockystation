@@ -4,7 +4,7 @@ mod box_array;
 pub mod cpu;
 pub mod memory;
 pub mod lcd;
-mod interrupt;
+pub mod interrupt;
 mod dac;
 mod irda;
 mod rtc;

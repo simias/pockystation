@@ -29,6 +29,10 @@ impl Dac {
             4 => self.sample = val as i16,
             _ => panic!("Unhandled DAC register {:x}", offset),
         }
+
+        if self.enabled && self.sample != 0{
+            panic!("{}", self.sample);
+        }
     }
 
     pub fn load<A: Addressable>(&self, offset: u32) -> u32 {
