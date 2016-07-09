@@ -158,7 +158,7 @@ impl Rtc {
                 0x01 => 0x31,
                 // XXX The RTC doesn't store the century, so it's
                 // probably not able to handle leap years at all? Does
-                // the kernel handle it?
+                // the BIOS handle it?
                 0x02 => 0x28,
                 0x03 => 0x31,
                 0x04 => 0x30,

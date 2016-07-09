@@ -5,14 +5,18 @@ use irda::Irda;
 use rtc::Rtc;
 use timer::Timer;
 
-use MASTER_CLOCK_HZ;
+use self::bios::Bios;
+use self::flash::Flash;
+
+pub mod bios;
+pub mod flash;
 
 pub struct Interconnect {
-    kernel: Box<[u8; KERNEL_SIZE]>,
-    flash: Box<[u8; FLASH_SIZE]>,
-    /// When true the kernel is mirrored at address 0. Set on reset so
-    /// that the reset vector starts executing from the kernel.
-    kernel_at_0: bool,
+    bios: Bios,
+    flash: Flash,
+    /// When true the BIOS is mirrored at address 0. Set on reset so
+    /// that the reset vector starts executing from the BIOS.
+    bios_at_0: bool,
     ram: Box<[u8; RAM_SIZE]>,
     irq_controller: IrqController,
     timers: [Timer; 3],
@@ -25,26 +29,11 @@ pub struct Interconnect {
 }
 
 impl Interconnect {
-    pub fn new(kernel: &[u8], flash: &[u8]) -> Interconnect {
-        assert!(kernel.len() == KERNEL_SIZE);
-        assert!(flash.len() == FLASH_SIZE);
-
-        let mut kernel_array = box_array![0; KERNEL_SIZE];
-
-        for (a, &v) in kernel_array.iter_mut().zip(kernel) {
-            *a = v;
-        }
-
-        let mut flash_array = box_array![0; FLASH_SIZE];
-
-        for (a, &v) in flash_array.iter_mut().zip(flash) {
-            *a = v;
-        }
-
+    pub fn new(bios: Bios, flash: Flash) -> Interconnect {
         Interconnect {
-            kernel: kernel_array,
-            flash: flash_array,
-            kernel_at_0: true,
+            bios: bios,
+            flash: flash,
+            bios_at_0: true,
             ram: box_array![0xca; RAM_SIZE],
             irq_controller: IrqController::new(),
             timers: [Timer::new(Interrupt::Timer0),
@@ -63,6 +52,18 @@ impl Interconnect {
         self.irq_controller.irq_pending()
     }
 
+    pub fn frame_ticks(&self) -> u32 {
+        self.frame_ticks
+    }
+
+    pub fn set_frame_ticks(&mut self, ticks: u32) {
+        self.frame_ticks = ticks
+    }
+
+    pub fn lcd(&self) -> &Lcd {
+        &self.lcd
+    }
+
     pub fn tick(&mut self, cpu_ticks: u32) {
         let master_ticks = cpu_ticks << self.cpu_clk_div;
 
@@ -73,11 +74,6 @@ impl Interconnect {
         self.timers[2].tick(&mut self.irq_controller, cpu_ticks, master_ticks);
 
         self.frame_ticks += master_ticks;
-
-        if self.frame_ticks > MASTER_CLOCK_HZ / 60 {
-            self.frame_ticks = 0;
-            self.lcd.draw();
-        }
     }
 
     pub fn load<A: Addressable>(&self, addr: u32) -> u32 {
@@ -93,12 +89,12 @@ impl Interconnect {
 
         match region {
             0x00 =>
-                if self.kernel_at_0 {
-                    self.read_kernel::<A>(offset)
+                if self.bios_at_0 {
+                    self.bios.read::<A>(offset)
                 } else {
                     self.read_ram::<A>(offset)
                 },
-            0x04 => self.read_kernel::<A>(offset),
+            0x04 => self.bios.read::<A>(offset),
             0x06 =>
                 match offset {
                     // F_CAL. XXX Need to dump a value from a real
@@ -106,7 +102,7 @@ impl Interconnect {
                     0x308 => 0xca1,
                     _ => unimplemented(),
                 },
-            0x08 => self.read_flash::<A>(offset),
+            0x08 => self.flash.read::<A>(offset),
             0x0a =>
                 match offset {
                     0x00...0x10 => self.irq_controller.load::<A>(offset),
@@ -155,7 +151,7 @@ impl Interconnect {
 
         match region {
             0x00 =>
-                if !self.kernel_at_0 {
+                if !self.bios_at_0 {
                     self.store_ram::<A>(offset, val);
                 },
             0x06 =>
@@ -214,32 +210,6 @@ impl Interconnect {
             }
     }
 
-    fn read_kernel<A: Addressable>(&self, offset: u32) -> u32 {
-        let offset = offset as usize;
-
-        let mut r = 0;
-
-        for i in 0..A::size() as usize {
-            r |= (self.kernel[offset + i] as u32) << (8 * i)
-        }
-
-        r
-    }
-
-    fn read_flash<A: Addressable>(&self, offset: u32) -> u32 {
-        let offset = offset as usize;
-
-        println!("FLASH read {:x}", offset);
-
-        let mut r = 0;
-
-        for i in 0..A::size() as usize {
-            r |= (self.flash[offset + i] as u32) << (8 * i)
-        }
-
-        r
-    }
-
     fn read_ram<A: Addressable>(&self, offset: u32) -> u32 {
         let offset = offset as usize;
 
@@ -262,7 +232,7 @@ impl Interconnect {
 
     fn set_f_ctrl<A: Addressable>(&mut self, val: u32) {
         if A::size() == 1 && val == 0x03 {
-            self.kernel_at_0 = false;
+            self.bios_at_0 = false;
         } else if A::size() == 4 {
             println!("F CTRL 0x{:08x}", val);
         } else {
@@ -304,11 +274,5 @@ impl Addressable for Word {
     }
 }
 
-/// Kernel size in bytes
-const KERNEL_SIZE: usize = 16 * 1024;
-
 /// RAM size in bytes
 const RAM_SIZE: usize = 2 * 1024;
-
-/// FLASH size in bytes
-const FLASH_SIZE: usize = 128 * 1024;

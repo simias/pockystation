@@ -51,24 +51,7 @@ impl Lcd {
         }
     }
 
-    pub fn draw(&self) {
-        println!("----------------------------------");
-
-        for &w in &self.fb {
-            print!("|");
-            for i in 0..32 {
-                let c =
-                    if (w & (1 << i)) != 0 {
-                        '#'
-                    } else {
-                        ' '
-                    };
-
-                print!("{}", c);
-            }
-            println!("|");
-        }
-
-        println!("----------------------------------");
+    pub fn framebuffer(&self) -> &[u32; 32] {
+        &self.fb
     }
 }

@@ -81,6 +81,15 @@ impl Cpu {
         cpu
     }
 
+    /// Run CPU for `master_ticks` master clock periods
+    pub fn run_ticks(&mut self, master_ticks: u32) {
+        while self.inter.frame_ticks() < master_ticks {
+            self.run_next_instruction();
+        }
+
+        self.inter.set_frame_ticks(0);
+    }
+
     pub fn run_next_instruction(&mut self) {
         // Assume each instruction takes exactly one CPU cycle for
         // now, a gross oversimplification...
@@ -126,6 +135,10 @@ impl Cpu {
 
             armv4_is::execute(self, instruction);
         }
+    }
+
+    pub fn interconnect(&self) -> &Interconnect {
+        &self.inter
     }
 
     fn n(&self) -> bool {
