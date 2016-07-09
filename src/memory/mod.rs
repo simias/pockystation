@@ -48,6 +48,10 @@ impl Interconnect {
         }
     }
 
+    pub fn reset(&mut self) {
+        self.bios_at_0 = true;
+    }
+
     pub fn irq_pending(&self) -> bool {
         self.irq_controller.irq_pending()
     }

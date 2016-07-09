@@ -25,7 +25,7 @@ pub struct Rtc {
     /// Year: [00..99]
     year: Bcd,
     /// Value to be adjusted when writing to ADJUST register, see the
-    /// `adjust` function for its meaning
+    /// `set_adjust` function for its meaning
     adjust: u8,
 }
 
@@ -79,6 +79,7 @@ impl Rtc {
     pub fn store<A: Addressable>(&mut self, offset: u32, val: u32) {
         match offset {
             0 => self.set_mode(val),
+            4 => self.set_adjust(val),
             _ => panic!("Unhandled RTC register {:x}", offset),
         }
     }
@@ -113,6 +114,19 @@ impl Rtc {
         self.paused = (val & 1) != 0;
 
         self.adjust = ((val >> 1) & 7) as u8;
+    }
+
+    fn set_adjust(&mut self, val: u32) {
+        debug!("RTC Adjust {:x}: {:x}", self.adjust, val);
+
+        // I don't understand how that register works, I just reset it
+        // to the default value for now so that it doesn't lock up in
+        // the reset sequence
+        match self.adjust {
+            0 => self.seconds = Bcd::zero(),
+            1 => self.minutes = Bcd::zero(),
+            _ => panic!("Unsupported adjust {:x}", self.adjust),
+        }
     }
 
     fn second_elapsed(&mut self) {

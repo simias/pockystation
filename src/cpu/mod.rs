@@ -75,10 +75,23 @@ impl Cpu {
                 inter: inter,
             };
 
-        // Reset vector
-        cpu.set_pc(0);
+        cpu.reset();
 
         cpu
+    }
+
+    pub fn reset(&mut self) {
+        self.inter.reset();
+
+        self.thumb = false;
+
+        self.irq_en = false;
+        self.fiq_en = false;
+
+        self.change_mode(Mode::Supervisor);
+
+        // Jump to reset vector
+        self.set_pc(0);
     }
 
     /// Run CPU for `master_ticks` master clock periods

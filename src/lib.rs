@@ -10,6 +10,8 @@ mod irda;
 mod rtc;
 mod timer;
 
+#[macro_use]
+extern crate log;
 extern crate shaman;
 
 /// Maximal frequency of the CPU, this clock can be shifted left by a

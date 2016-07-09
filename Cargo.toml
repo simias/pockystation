@@ -5,3 +5,4 @@ authors = ["Lionel Flandrin <lionel.flandrin@gmail.com>"]
 
 [dependencies]
 shaman = "0.1.0"
+log = "0.3.6"
