@@ -71,6 +71,10 @@ impl IrqController {
         r as u32
     }
 
+    pub fn ack(&mut self, val: u16) {
+        self.latch &= !val
+    }
+
     /// Return the raw level of an interrupt
     pub fn raw_interrupt(&mut self, irq: Interrupt) -> bool {
         (self.raw & (1 << (irq as u16))) != 0
@@ -84,9 +88,11 @@ impl IrqController {
         if level == true {
             if !self.raw_interrupt(irq) {
                 // Rising edge
-                self.latch |= mask;
-
-                println!("Interrupt! {:?} {}", irq, level);
+                //
+                // XXX looks like interrupts are not latched when they
+                // are masked? Is the mask ignored between the latch
+                // and the CPU?
+                self.latch |= mask & self.mask;
             }
 
             self.raw |= mask;

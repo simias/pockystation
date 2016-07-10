@@ -27,6 +27,11 @@ pub struct Rtc {
     /// Value to be adjusted when writing to ADJUST register, see the
     /// `set_adjust` function for its meaning
     adjust: u8,
+    /// XXX hack: the BIOS always adjusts the various counters twice
+    /// at a time and if we don't ignore ore of them we can't reach
+    /// any odd number which causes a deadlock. Need to investigate
+    /// how the real hardware behaves in this situation.
+    skip: bool,
 }
 
 impl Rtc {
@@ -42,6 +47,7 @@ impl Rtc {
             month: Bcd::one(),
             year: Bcd::from_bcd(0x99).unwrap(),
             adjust: 0,
+            skip: false,
         }
     }
 
@@ -117,16 +123,36 @@ impl Rtc {
     }
 
     fn set_adjust(&mut self, val: u32) {
-        debug!("RTC Adjust {:x}: {:x}", self.adjust, val);
+        debug!("RTC Adjust {:x}: {:x} skip: {}", self.adjust, val, self.skip);
+
+        if self.skip {
+            self.skip = false;
+            return;
+        }
 
         // I don't understand how that register works, I just reset it
         // to the default value for now so that it doesn't lock up in
         // the reset sequence
-        match self.adjust {
-            0 => self.seconds = Bcd::zero(),
-            1 => self.minutes = Bcd::zero(),
-            _ => panic!("Unsupported adjust {:x}", self.adjust),
-        }
+        let (counter, min, max) =
+            match self.adjust {
+                0 => (&mut self.seconds, 0x00, 0x59),
+                1 => (&mut self.minutes, 0x00, 0x59),
+                2 => (&mut self.hours, 0x00, 0x23),
+                3 => (&mut self.week_day, 0x01, 0x07),
+                4 => (&mut self.day, 0x01, 0x31),
+                5 => (&mut self.month, 0x01, 0x31),
+                6 => (&mut self.year, 0x00, 0x99),
+                _ => panic!("Unsupported adjust {:x}", self.adjust),
+            };
+
+        *counter =
+            if counter.bcd() < max {
+                counter.next().unwrap()
+            } else {
+                Bcd::from_bcd(min).unwrap()
+            };
+
+        self.skip = true;
     }
 
     fn second_elapsed(&mut self) {
