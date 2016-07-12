@@ -132,7 +132,7 @@ impl Cpu {
                 panic!("Misaligned PC! {:?}", self);
             }
 
-            let instruction = self.load16(pc);
+            let instruction = self.inter.load::<HalfWord>(pc) as u16;
 
             thumbv1_is::execute(self, instruction);
 
@@ -148,7 +148,7 @@ impl Cpu {
                 panic!("Misaligned PC! {:?}", self);
             }
 
-            let instruction = self.load32(pc);
+            let instruction = self.inter.load::<Word>(pc);
 
             armv4_is::execute(self, instruction);
         }
@@ -478,18 +478,6 @@ impl Cpu {
         self.inter.load::<Word>(addr)
     }
 
-    fn load16(&mut self, addr: u32) -> u16 {
-        if addr & 1 != 0 {
-            panic!("Unaligned load16! 0x{:08x} {:?}", addr, self);
-        }
-
-        self.inter.load::<HalfWord>(addr) as u16
-    }
-
-    fn load8(&mut self, addr: u32) -> u8 {
-        self.inter.load::<Byte>(addr) as u8
-    }
-
     fn store32(&mut self, addr: u32, val: u32) {
         if addr & 3 != 0 {
             panic!("Unaligned store32! 0x{:08x} {:?}", addr, self);
@@ -498,12 +486,24 @@ impl Cpu {
         self.inter.store::<Word>(addr, val);
     }
 
+    fn load16(&mut self, addr: u32) -> u16 {
+        if addr & 1 != 0 {
+            panic!("Unaligned load16! 0x{:08x} {:?}", addr, self);
+        }
+
+        self.inter.load::<HalfWord>(addr) as u16
+    }
+
     fn store16(&mut self, addr: u32, val: u32) {
         if addr & 1 != 0 {
             panic!("Unaligned store16! 0x{:08x} {:?}", addr, self);
         }
 
         self.inter.store::<HalfWord>(addr, val);
+    }
+
+    fn load8(&mut self, addr: u32) -> u8 {
+        self.inter.load::<Byte>(addr) as u8
     }
 
     fn store8(&mut self, addr: u32, val: u32) {

@@ -183,7 +183,7 @@ impl Interconnect {
                 match offset {
                     0x00...0x10 => self.irq_controller.store::<A>(offset, val),
                     0x800000...0x800028 => {
-                        let timer = (offset >> 8) & 3;
+                        let timer = (offset >> 4) & 3;
 
                         self.timers[timer as usize].store::<A>(offset & 0xf,
                                                                val);

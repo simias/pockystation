@@ -470,7 +470,7 @@ fn op10d_mul(instruction: Instruction, cpu: &mut Cpu) {
     let a = cpu.reg(rd);
     let b = cpu.reg(rm);
 
-    let val = a * b;
+    let val = a.wrapping_mul(b);
 
     cpu.set_reg(rd, val);
     cpu.set_n((val as i32) < 0);

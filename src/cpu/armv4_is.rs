@@ -28,12 +28,16 @@ impl Instruction {
         self.0 >> 28
     }
 
+    fn rn(self) -> RegisterIndex {
+        RegisterIndex((self.0 >> 16) & 0xf)
+    }
+
     fn rd(self) -> RegisterIndex {
         RegisterIndex((self.0 >> 12) & 0xf)
     }
 
-    fn rn(self) -> RegisterIndex {
-        RegisterIndex((self.0 >> 16) & 0xf)
+    fn rs(self) -> RegisterIndex {
+        RegisterIndex((self.0 >> 8) & 0xf)
     }
 
     fn rm(self) -> RegisterIndex {
@@ -71,7 +75,24 @@ impl Instruction {
         imm.rotate_right(rot)
     }
 
-    /// Addressing mode 1: Logicat shift left by immediate. Used when
+    /// Addressing mode 1: Logical shift left by immediate.
+    fn mode1_register_lshift_imm(self, cpu: &Cpu) -> (u32, bool) {
+        let shift = (self.0 >> 7) & 0x1f;
+        let rm    = self.rm();
+
+        let val = cpu.reg(rm);
+
+        match shift {
+            0 => (val, cpu.c()),
+            _ => {
+                let carry = ((val << (shift - 1)) & 0x80000000) != 0;
+
+                (val << shift, carry)
+            }
+        }
+    }
+
+    /// Addressing mode 1: Logical shift left by immediate. Used when
     /// shifter carry is not needed.
     fn mode1_register_lshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
         let shift = (self.0 >> 7) & 0x1f;
@@ -80,6 +101,47 @@ impl Instruction {
         let val = cpu.reg(rm);
 
         val << shift
+    }
+
+    /// Addressing mode 1: Logical shift left by register. Used when
+    /// shifter carry is not needed.
+    fn mode1_register_lshift_reg_no_carry(self, cpu: &Cpu) -> u32 {
+        let rm = self.rm();
+        let rs = self.rs();
+
+        let val = cpu.reg(rm);
+        let shift = cpu.reg(rs);
+
+        match shift {
+            0...31 => val << shift,
+            _ => 0,
+        }
+    }
+
+    /// Addressing mode 1: Logical shift right by immediate. Used when
+    /// shifter carry is not needed.
+    fn mode1_register_rshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
+        let shift = (self.0 >> 7) & 0x1f;
+        let rm    = self.rm();
+
+        let val = cpu.reg(rm);
+
+        val >> shift
+    }
+
+    /// Addressing mode 1: Logical shift right by register. Used when
+    /// shifter carry is not needed.
+    fn mode1_register_rshift_reg_no_carry(self, cpu: &Cpu) -> u32 {
+        let rm = self.rm();
+        let rs = self.rs();
+
+        let val = cpu.reg(rm);
+        let shift = cpu.reg(rs);
+
+        match shift {
+            0...31 => val >> shift,
+            _ => 0,
+        }
     }
 
     /// Addressing mode 2: immediate offset
@@ -124,6 +186,17 @@ impl Instruction {
         self.0 & 0xffff
     }
 
+    /// Load a 32 bit value from memory and optionally rotate it based
+    /// on bits [1:0]
+    fn ldr(self, cpu: &mut Cpu, addr: u32) -> u32 {
+        let rot = (addr & 3) * 8;
+        let addr = addr & !3;
+
+        let val = cpu.load32(addr);
+
+        val.rotate_right(rot)
+    }
+
     /// Execute an STM instruction. Returns the address of the last
     /// store + 4.
     fn stm(self, cpu: &mut Cpu, start_addr: u32) -> u32 {
@@ -158,6 +231,21 @@ impl Instruction {
         }
 
         addr
+    }
+
+    fn subs(self, cpu: &mut Cpu, rd: RegisterIndex, a: u32, b: u32) {
+        let val = a.wrapping_sub(b);
+
+        let a_neg = (a as i32) < 0;
+        let b_neg = (b as i32) < 0;
+        let v_neg = (val as i32) < 0;
+
+        cpu.set_reg(rd, val);
+
+        cpu.set_n(v_neg);
+        cpu.set_z(val == 0);
+        cpu.set_c(a >= b);
+        cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
     }
 
     /// Execute this instruction
@@ -215,27 +303,41 @@ impl Instruction {
     fn decode_and_execute(self, cpu: &mut Cpu) {
         match self.opcode() {
             0x000 | 0x008 => self.op000_and_lsl_i(cpu),
+            0x009         => self.op009_mul(cpu),
+            0x040 | 0x048 => self.op040_sub_lsl_i(cpu),
+            0x050 | 0x058 => self.op050_sub_lsl_is(cpu),
             0x080 | 0x088 => self.op080_add_lsl_i(cpu),
             0x120         => self.op120_msr_cpsr(cpu),
             0x121         => self.op121_bx(cpu),
             0x140         => self.op140_mrs_spsr(cpu),
             0x150 | 0x158 => self.op150_cmp_lsl_i(cpu),
+            0x19b         => self.op19b_ldrh_pu(cpu),
             0x1a0 | 0x1a8 => self.op1a0_mov_lsl_i(cpu),
+            0x1a2 | 0x1aa => self.op1a2_mov_lsr_i(cpu),
+            0x1b0 | 0x1b8 => self.op1b0_mov_lsl_is(cpu),
+            0x1a1         => self.op1a1_mov_lsl_r(cpu),
+            0x1a3         => self.op1a3_mov_lsr_r(cpu),
             0x1cb         => self.op1cb_strh_pui(cpu),
             0x1db         => self.op1db_ldrh_pui(cpu),
+            0x1e0 | 0x1e8 => self.op1e0_mvn_lsl_i(cpu),
             0x200...0x20f => self.op20x_and_i(cpu),
             0x210...0x21f => self.op21x_and_is(cpu),
             0x240...0x24f => self.op24x_sub_i(cpu),
+            0x250...0x25f => self.op25x_sub_is(cpu),
+            0x270...0x27f => self.op27x_rsb_is(cpu),
             0x280...0x28f => self.op28x_add_i(cpu),
             0x310...0x31f => self.op31x_tst_i(cpu),
             0x350...0x35f => self.op35x_cmp_i(cpu),
             0x3a0...0x3af => self.op3ax_mov_i(cpu),
             0x480...0x48f => self.op48x_str_u(cpu),
             0x580...0x58f => self.op58x_str_pu(cpu),
+            0x490...0x49f => self.op49x_ldr_u(cpu),
             0x590...0x59f => self.op59x_ldr_pu(cpu),
             0x5c0...0x5cf => self.op5cx_strb_pu(cpu),
             0x780 | 0x788 => self.op780_str_ipu(cpu),
             0x790 | 0x798 => self.op790_ldr_ipu(cpu),
+            0x880...0x88f => self.op88x_stm_u(cpu),
+            0x890...0x89f => self.op89x_ldm_u(cpu),
             0x8a0...0x8af => self.op8ax_stm_uw(cpu),
             0x8b0...0x8bf => self.op8bx_ldm_uw(cpu),
             0x8f0...0x8ff => self.op8fx_ldm_spsr_uw(cpu),
@@ -247,10 +349,11 @@ impl Instruction {
         }
     }
 
-    fn unimplemented(self, _: &mut Cpu) {
-        panic!("Unimplemented instruction {} ({:03x})",
+    fn unimplemented(self, cpu: &mut Cpu) {
+        panic!("Unimplemented instruction {} ({:03x})\n{:?}",
                self,
-               self.opcode());
+               self.opcode(),
+               cpu);
     }
 
     fn op000_and_lsl_i(self, cpu: &mut Cpu) {
@@ -262,6 +365,44 @@ impl Instruction {
 
         cpu.set_reg(dst, val);
     }
+
+    fn op009_mul(self, cpu: &mut Cpu) {
+        let rm  = self.rm();
+        let rs  = self.rs();
+        let rn  = self.rn();
+
+        if (self.0 & 0xf000) != 0 {
+            // Should be 0
+            panic!("Invalid MUL instruction");
+        }
+
+        let val = cpu.reg(rm).wrapping_mul(cpu.reg(rs));
+
+        cpu.set_reg(rn, val);
+    }
+
+    fn op040_sub_lsl_i(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let rn  = self.rn();
+        let b   = self.mode1_register_lshift_imm_no_carry(cpu);
+
+        let a = cpu.reg(rn);
+
+        let val = a.wrapping_sub(b);
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op050_sub_lsl_is(self, cpu: &mut Cpu) {
+        let rd  = self.rd();
+        let rn  = self.rn();
+        let b   = self.mode1_register_lshift_imm_no_carry(cpu);
+
+        let a = cpu.reg(rn);
+
+        self.subs(cpu, rd, a, b);
+    }
+
 
     fn op080_add_lsl_i(self, cpu: &mut Cpu) {
         let dst = self.rd();
@@ -341,9 +482,53 @@ impl Instruction {
         cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
     }
 
+    fn op19b_ldrh_pu(self, cpu: &mut Cpu) {
+        let rm     = self.rm();
+        let rd     = self.rd();
+        let rn     = self.rn();
+
+        let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
+
+        let val = cpu.load16(addr);
+
+        cpu.set_reg(rd, val as u32);
+    }
+
     fn op1a0_mov_lsl_i(self, cpu: &mut Cpu) {
         let dst = self.rd();
         let val = self.mode1_register_lshift_imm_no_carry(cpu);
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op1a2_mov_lsr_i(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let val = self.mode1_register_rshift_imm_no_carry(cpu);
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op1b0_mov_lsl_is(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let (val, carry) = self.mode1_register_lshift_imm(cpu);
+
+        cpu.set_reg(dst, val);
+
+        cpu.set_n((val as i32) < 0);
+        cpu.set_z(val == 0);
+        cpu.set_c(carry);
+    }
+
+    fn op1a1_mov_lsl_r(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let val = self.mode1_register_lshift_reg_no_carry(cpu);
+
+        cpu.set_reg(dst, val);
+    }
+
+    fn op1a3_mov_lsr_r(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let val = self.mode1_register_rshift_reg_no_carry(cpu);
 
         cpu.set_reg(dst, val);
     }
@@ -372,6 +557,12 @@ impl Instruction {
         cpu.set_reg(rd, val as u32)
     }
 
+    fn op1e0_mvn_lsl_i(self, cpu: &mut Cpu) {
+        let dst = self.rd();
+        let val = self.mode1_register_lshift_imm_no_carry(cpu);
+
+        cpu.set_reg(dst, !val);
+    }
 
     fn op20x_and_i(self, cpu: &mut Cpu) {
         let dst = self.rd();
@@ -416,6 +607,26 @@ impl Instruction {
         let val = a.wrapping_sub(b);
 
         cpu.set_reg(dst, val);
+    }
+
+    fn op25x_sub_is(self, cpu: &mut Cpu) {
+        let rd  = self.rd();
+        let rn  = self.rn();
+        let b   = self.mode1_imm_no_carry();
+
+        let a = cpu.reg(rn);
+
+        self.subs(cpu, rd, a, b);
+    }
+
+    fn op27x_rsb_is(self, cpu: &mut Cpu) {
+        let rd  = self.rd();
+        let rn  = self.rn();
+        let b   = self.mode1_imm_no_carry();
+
+        let a = cpu.reg(rn);
+
+        self.subs(cpu, rd, b, a);
     }
 
     fn op28x_add_i(self, cpu: &mut Cpu) {
@@ -521,6 +732,25 @@ impl Instruction {
         cpu.store32(addr, val);
     }
 
+    fn op49x_ldr_u(self, cpu: &mut Cpu) {
+        let rd     = self.rd();
+        let rn     = self.rn();
+        let offset = self.mode2_offset_imm();
+
+        if rn.is_pc() {
+            panic!("unpredictable LDR");
+        }
+
+        let addr = cpu.reg(rn);
+
+        let post_addr = addr.wrapping_add(offset);
+
+        let val = self.ldr(cpu, addr);
+
+        cpu.set_reg(rn, post_addr);
+        cpu.set_reg_pc_mask(rd, val);
+    }
+
     fn op59x_ldr_pu(self, cpu: &mut Cpu) {
         let dst    = self.rd();
         let base   = self.rn();
@@ -528,7 +758,7 @@ impl Instruction {
 
         let addr = cpu.reg(base).wrapping_add(offset);
 
-        let val = cpu.load32(addr);
+        let val = self.ldr(cpu, addr);
 
         cpu.set_reg_pc_mask(dst, val);
     }
@@ -575,9 +805,44 @@ impl Instruction {
 
         let addr = cpu.reg(base).wrapping_add(offset);
 
-        let val = cpu.load32(addr);
+        let val = self.ldr(cpu, addr);
 
         cpu.set_reg_pc_mask(dst, val);
+    }
+
+    fn op88x_stm_u(self, cpu: &mut Cpu) {
+        let rn = self.rn();
+
+        if rn.is_pc() {
+            panic!("PC-relative STM!");
+        }
+
+        let start_addr = cpu.reg(rn);
+
+        self.stm(cpu, start_addr);
+    }
+
+    fn op89x_ldm_u(self, cpu: &mut Cpu) {
+        let rn   = self.rn();
+        let list = self.register_list();
+
+        if rn.is_pc()  {
+            panic!("Unpredictable LDM");
+        }
+
+        let mut addr = cpu.reg(rn);
+
+        for i in 0..16 {
+            if ((list >> i) & 1) != 0 {
+                let reg = RegisterIndex(i);
+
+                let val = cpu.load32(addr);
+
+                cpu.set_reg_pc_mask(reg, val);
+
+                addr = addr.wrapping_add(4);
+            }
+        }
     }
 
     fn op8ax_stm_uw(self, cpu: &mut Cpu) {
