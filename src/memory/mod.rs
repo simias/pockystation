@@ -29,7 +29,7 @@ pub struct Interconnect {
 }
 
 impl Interconnect {
-    pub fn new(bios: Bios, flash: Flash) -> Interconnect {
+    pub fn new(bios: Bios, flash: Flash, dac: Dac) -> Interconnect {
         Interconnect {
             bios: bios,
             flash: flash,
@@ -41,7 +41,7 @@ impl Interconnect {
                      Timer::new(Interrupt::Timer2),],
             rtc: Rtc::new(),
             lcd: Lcd::new(),
-            dac: Dac::new(),
+            dac: dac,
             irda: Irda::new(),
             cpu_clk_div: 7,
             frame_ticks: 0,
@@ -79,11 +79,12 @@ impl Interconnect {
     pub fn tick(&mut self, cpu_ticks: u32) {
         let master_ticks = cpu_ticks << self.cpu_clk_div;
 
-        self.rtc.tick(&mut self.irq_controller, cpu_ticks, master_ticks);
+        self.rtc.tick(&mut self.irq_controller, master_ticks);
+        self.dac.tick(master_ticks);
 
-        self.timers[0].tick(&mut self.irq_controller, cpu_ticks, master_ticks);
-        self.timers[1].tick(&mut self.irq_controller, cpu_ticks, master_ticks);
-        self.timers[2].tick(&mut self.irq_controller, cpu_ticks, master_ticks);
+        self.timers[0].tick(&mut self.irq_controller, cpu_ticks);
+        self.timers[1].tick(&mut self.irq_controller, cpu_ticks);
+        self.timers[2].tick(&mut self.irq_controller, cpu_ticks);
 
         self.frame_ticks += master_ticks;
     }

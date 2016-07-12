@@ -53,7 +53,6 @@ impl Rtc {
 
     pub fn tick(&mut self,
                 irq: &mut IrqController,
-                _cpu_ticks: u32,
                 mut master_ticks: u32) {
 
         while master_ticks > 0 {

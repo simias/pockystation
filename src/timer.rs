@@ -31,8 +31,7 @@ impl Timer {
 
     pub fn tick(&mut self,
                 irq: &mut IrqController,
-                mut cpu_ticks: u32,
-                _master_ticks: u32) {
+                mut cpu_ticks: u32) {
 
         if self.enabled {
             while cpu_ticks > 0 {
