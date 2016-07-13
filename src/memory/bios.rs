@@ -35,7 +35,7 @@ impl Bios {
         Some(Bios { data: data })
     }
 
-    pub fn read<A: Addressable>(&self, offset: u32) -> u32 {
+    pub fn load<A: Addressable>(&self, offset: u32) -> u32 {
         let offset = offset as usize;
 
         let mut r = 0;

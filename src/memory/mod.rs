@@ -14,9 +14,6 @@ pub mod flash;
 pub struct Interconnect {
     bios: Bios,
     flash: Flash,
-    /// When true the BIOS is mirrored at address 0. Set on reset so
-    /// that the reset vector starts executing from the BIOS.
-    bios_at_0: bool,
     ram: Box<[u8; RAM_SIZE]>,
     irq_controller: IrqController,
     timers: [Timer; 3],
@@ -33,7 +30,6 @@ impl Interconnect {
         Interconnect {
             bios: bios,
             flash: flash,
-            bios_at_0: true,
             ram: box_array![0xca; RAM_SIZE],
             irq_controller: IrqController::new(),
             timers: [Timer::new(Interrupt::Timer0),
@@ -49,7 +45,7 @@ impl Interconnect {
     }
 
     pub fn reset(&mut self) {
-        self.bios_at_0 = true;
+        self.flash.reset();
     }
 
     pub fn irq_pending(&self) -> bool {
@@ -94,7 +90,7 @@ impl Interconnect {
         let offset = addr & 0xffffff;
 
         if (addr & (A::size() as u32 - 1)) != 0 {
-            panic!("Missaligned {}bit read at 0x{:08x}", A::size() * 8, addr);
+            panic!("Missaligned {}bit load at 0x{:08x}", A::size() * 8, addr);
         }
 
         let unimplemented =
@@ -102,20 +98,14 @@ impl Interconnect {
 
         match region {
             0x00 =>
-                if self.bios_at_0 {
-                    self.bios.read::<A>(offset)
+                if self.flash.bios_at_0() {
+                    self.bios.load::<A>(offset)
                 } else {
-                    self.read_ram::<A>(offset)
+                    self.load_ram::<A>(offset)
                 },
-            0x04 => self.bios.read::<A>(offset),
-            0x06 =>
-                match offset {
-                    // F_CAL. XXX Need to dump a value from a real
-                    // PocketStation.
-                    0x308 => 0xca1,
-                    _ => unimplemented(),
-                },
-            0x08 => self.flash.read::<A>(offset),
+            0x04 => self.bios.load::<A>(offset),
+            0x06 => self.flash.load_config::<A>(offset),
+            0x08 => self.flash.load_raw::<A>(offset),
             0x0a =>
                 match offset {
                     0x00...0x10 => self.irq_controller.load::<A>(offset),
@@ -164,22 +154,10 @@ impl Interconnect {
 
         match region {
             0x00 =>
-                if !self.bios_at_0 {
+                if !self.flash.bios_at_0() {
                     self.store_ram::<A>(offset, val);
                 },
-            0x06 =>
-                match offset {
-                    0x00 => self.set_f_ctrl::<A>(val),
-                    0x08 => println!("F BANK FLG 0x{:08x}", val),
-                    0x0c => println!("F_WAIT1 0x{:08x}", val),
-                    0x10 => println!("F_WAIT2 0x{:08x}", val),
-                    0x100...0x13c => {
-                        let bank = (offset & 0x3f) / 4;
-
-                        println!("F BANK VAL{} 0x{:08x}", bank, val);
-                    }
-                    _ => unimplemented(),
-                },
+            0x06 => self.flash.store_config::<A>(offset, val),
             0x0a =>
                 match offset {
                     0x00...0x10 => self.irq_controller.store::<A>(offset, val),
@@ -223,7 +201,7 @@ impl Interconnect {
             }
     }
 
-    fn read_ram<A: Addressable>(&self, offset: u32) -> u32 {
+    fn load_ram<A: Addressable>(&self, offset: u32) -> u32 {
         let offset = offset as usize;
 
         let mut r = 0;
@@ -240,16 +218,6 @@ impl Interconnect {
 
         for i in 0..A::size() as usize {
             self.ram[offset + i] = (val >> (i * 8)) as u8;
-        }
-    }
-
-    fn set_f_ctrl<A: Addressable>(&mut self, val: u32) {
-        if A::size() == 1 && val == 0x03 {
-            self.bios_at_0 = false;
-        } else if A::size() == 4 {
-            println!("F CTRL 0x{:08x}", val);
-        } else {
-            panic!("unhandled F_CTRL 0x{:02x}", val);
         }
     }
 }
