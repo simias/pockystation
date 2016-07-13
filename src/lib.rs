@@ -6,8 +6,8 @@ pub mod memory;
 pub mod lcd;
 pub mod interrupt;
 pub mod dac;
+pub mod rtc;
 mod irda;
-mod rtc;
 mod timer;
 
 #[macro_use]

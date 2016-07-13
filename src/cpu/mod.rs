@@ -104,6 +104,7 @@ impl Cpu {
     }
 
     pub fn run_next_instruction(&mut self) {
+
         // Assume each instruction takes exactly one CPU cycle for
         // now, a gross oversimplification...
         self.inter.tick(1);

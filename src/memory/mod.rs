@@ -72,6 +72,10 @@ impl Interconnect {
         &mut self.irq_controller
     }
 
+    pub fn rtc_mut(&mut self) -> &mut Rtc {
+        &mut self.rtc
+    }
+
     pub fn tick(&mut self, cpu_ticks: u32) {
         let master_ticks = cpu_ticks << self.cpu_clk_div;
 

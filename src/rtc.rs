@@ -97,6 +97,58 @@ impl Rtc {
         }
     }
 
+    pub fn set_seconds(&mut self, bcd: Bcd) {
+        let v = bcd.bcd();
+
+        assert!(v <= 0x59);
+
+        self.seconds = bcd;
+    }
+
+    pub fn set_minutes(&mut self, bcd: Bcd) {
+        let v = bcd.bcd();
+
+        assert!(v <= 0x59);
+
+        self.minutes = bcd;
+    }
+
+    pub fn set_hours(&mut self, bcd: Bcd) {
+        let v = bcd.bcd();
+
+        assert!(v <= 0x23);
+
+        self.hours = bcd;
+    }
+
+    pub fn set_week_day(&mut self, bcd: Bcd) {
+        let v = bcd.bcd();
+
+        assert!(v >= 0x01 && v <= 0x07);
+
+        self.week_day = bcd;
+    }
+
+    pub fn set_day(&mut self, bcd: Bcd) {
+        let v = bcd.bcd();
+
+        assert!(v >= 0x01 && v <= 0x31);
+
+        self.day = bcd;
+    }
+
+    pub fn set_month(&mut self, bcd: Bcd) {
+        let v = bcd.bcd();
+
+        assert!(v >= 0x01 && v <= 0x12);
+
+        self.month = bcd;
+    }
+
+    pub fn set_year(&mut self, bcd: Bcd) {
+        self.year = bcd;
+    }
+
     fn time(&self) -> u32 {
         let seconds = self.seconds.bcd() as u32;
         let minutes = self.minutes.bcd() as u32;
@@ -244,6 +296,16 @@ impl Bcd {
             Some(Bcd(b))
         } else {
             None
+        }
+    }
+
+    /// Build a `Bcd` from a binary `u8`. Returns `None` if the value
+    /// is greater than 0x99.
+    pub fn from_binary(b: u8) -> Option<Bcd> {
+        if b > 99 {
+            None
+        } else {
+            Some(Bcd(((b / 10) << 4) | (b % 10)))
         }
     }
 
