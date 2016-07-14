@@ -5,6 +5,7 @@ use memory::Addressable;
 
 use MASTER_CLOCK_HZ;
 
+#[derive(RustcDecodable, RustcEncodable)]
 pub struct Rtc {
     /// True if the RTC is paused
     paused: bool,
@@ -285,6 +286,7 @@ impl fmt::Debug for Rtc {
 
 /// A single packed BCD value in the range 0-99 (2 digits, 4bits per
 /// digit).
+#[derive(RustcDecodable, RustcEncodable)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Bcd(u8);
 

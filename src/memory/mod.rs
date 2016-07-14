@@ -5,16 +5,19 @@ use irda::Irda;
 use rtc::Rtc;
 use timer::Timer;
 
+use self::ram::Ram;
 use self::bios::Bios;
 use self::flash::Flash;
 
+pub mod ram;
 pub mod bios;
 pub mod flash;
 
+#[derive(RustcDecodable, RustcEncodable)]
 pub struct Interconnect {
     bios: Bios,
     flash: Flash,
-    ram: Box<[u8; RAM_SIZE]>,
+    ram: Ram,
     irq_controller: IrqController,
     timers: [Timer; 3],
     rtc: Rtc,
@@ -30,7 +33,7 @@ impl Interconnect {
         Interconnect {
             bios: bios,
             flash: flash,
-            ram: box_array![0xca; RAM_SIZE],
+            ram: Ram::new(),
             irq_controller: IrqController::new(),
             timers: [Timer::new(Interrupt::Timer0),
                      Timer::new(Interrupt::Timer1),
@@ -64,8 +67,8 @@ impl Interconnect {
         &self.lcd
     }
 
-    pub fn irq_controller(&mut self) -> &mut IrqController {
-        &mut self.irq_controller
+    pub fn irq_controller(&mut self) -> &IrqController {
+        &self.irq_controller
     }
 
     pub fn irq_controller_mut(&mut self) -> &mut IrqController {
@@ -74,6 +77,22 @@ impl Interconnect {
 
     pub fn rtc_mut(&mut self) -> &mut Rtc {
         &mut self.rtc
+    }
+
+    pub fn flash(&self) -> &Flash {
+        &self.flash
+    }
+
+    pub fn flash_mut(&mut self) -> &mut Flash {
+        &mut self.flash
+    }
+
+    pub fn dac_mut(&mut self) -> &mut Dac {
+        &mut self.dac
+    }
+
+    pub fn set_bios(&mut self, bios: Bios) {
+        self.bios = bios;
     }
 
     pub fn tick(&mut self, cpu_ticks: u32) {
@@ -105,7 +124,7 @@ impl Interconnect {
                 if self.flash.bios_at_0() {
                     self.bios.load::<A>(offset)
                 } else {
-                    self.load_ram::<A>(offset)
+                    self.ram.load::<A>(offset)
                 },
             0x04 => self.bios.load::<A>(offset),
             0x06 => self.flash.load_config::<A>(offset),
@@ -159,7 +178,7 @@ impl Interconnect {
         match region {
             0x00 =>
                 if !self.flash.bios_at_0() {
-                    self.store_ram::<A>(offset, val);
+                    self.ram.store::<A>(offset, val);
                 },
             0x06 => self.flash.store_config::<A>(offset, val),
             0x0a =>
@@ -204,26 +223,6 @@ impl Interconnect {
             _ => unimplemented(),
             }
     }
-
-    fn load_ram<A: Addressable>(&self, offset: u32) -> u32 {
-        let offset = offset as usize;
-
-        let mut r = 0;
-
-        for i in 0..A::size() as usize {
-            r |= (self.ram[offset + i] as u32) << (8 * i)
-        }
-
-        r
-    }
-
-    fn store_ram<A: Addressable>(&mut self, offset: u32, val: u32) {
-        let offset = offset as usize;
-
-        for i in 0..A::size() as usize {
-            self.ram[offset + i] = (val >> (i * 8)) as u8;
-        }
-    }
 }
 
 /// Trait representing the attributes of a memory access
@@ -258,6 +257,3 @@ impl Addressable for Word {
         4
     }
 }
-
-/// RAM size in bytes
-const RAM_SIZE: usize = 2 * 1024;

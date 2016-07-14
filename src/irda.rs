@@ -2,6 +2,7 @@
 
 use memory::Addressable;
 
+#[derive(RustcDecodable, RustcEncodable)]
 pub struct Irda {
     mode: u8,
     led_on: bool,

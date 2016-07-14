@@ -1,5 +1,7 @@
 //! PocketStation Audio DAC emulation
 
+use rustc_serialize::{Decodable, Encodable, Decoder, Encoder};
+
 use memory::Addressable;
 use MASTER_CLOCK_HZ;
 
@@ -74,10 +76,62 @@ impl Dac {
             _ => panic!("Unhandled DAC register {:x}", offset),
         }
     }
+
+    pub fn set_backend(&mut self, backend: Box<Backend>) {
+        self.backend = backend
+    }
+}
+
+impl Encodable for Dac {
+    fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
+        // We don't serialize the backend, it'll be up to the frontend
+        // to reset it.
+
+        s.emit_struct("Dac", 3, |s| {
+            try!(s.emit_struct_field("sample", 0,
+                                     |s| self.sample.encode(s)));
+            try!(s.emit_struct_field("enabled", 1,
+                                     |s| self.enabled.encode(s)));
+            try!(s.emit_struct_field("divider", 2,
+                                     |s| self.divider.encode(s)));
+
+            Ok(())
+        })
+    }
+}
+
+impl Decodable for Dac {
+    fn decode<D: Decoder>(d: &mut D) -> Result<Dac, D::Error> {
+        d.read_struct("Dac", 3, |d| {
+            let mut dac = Dac::new(Box::new(DummyBackend));
+
+            dac.sample =
+                try!(d.read_struct_field("sample",
+                                         0,
+                                         Decodable::decode));
+            dac.enabled =
+                try!(d.read_struct_field("enabled",
+                                         1,
+                                         Decodable::decode));
+            dac.divider =
+                try!(d.read_struct_field("divider",
+                                         2,
+                                         Decodable::decode));
+
+            Ok(dac)
+        })
+    }
 }
 
 pub trait Backend {
     fn push_sample(&mut self, sample: i16);
+}
+
+struct DummyBackend;
+
+impl Backend for DummyBackend {
+    fn push_sample(&mut self, _: i16) {
+    }
 }
 
 /// Technically the audio frequency could reach MASTER_CLOCK_HZ (if

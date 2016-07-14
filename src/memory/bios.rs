@@ -1,3 +1,5 @@
+use rustc_serialize::{Decodable, Encodable, Decoder, Encoder};
+
 use shaman::digest::Digest;
 use shaman::sha2::Sha256;
 
@@ -45,6 +47,31 @@ impl Bios {
         }
 
         r
+    }
+}
+
+impl Encodable for Bios {
+    fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
+        // We don't store the full BIOS image in the savestate, mainly
+        // because I want to be able to share and distribute
+        // savestates without having to worry about legal
+        // implications. If we ever support multiple kernels we should
+        // probably serialize the SHA256 to make sure we're loading
+        // the correct one.
+
+        s.emit_nil()
+    }
+}
+
+impl Decodable for Bios {
+    fn decode<D: Decoder>(d: &mut D) -> Result<Bios, D::Error> {
+        try!(d.read_nil());
+
+        // Create a dummy BIOS with garbage contents, the frontend
+        // will have to reload it with the real kernel.
+        Ok(Bios {
+            data: Box::new([0xba; BIOS_SIZE]),
+        })
     }
 }
 

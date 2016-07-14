@@ -2,6 +2,7 @@
 
 use memory::Addressable;
 
+#[derive(RustcDecodable, RustcEncodable)]
 pub struct Lcd {
     mode: u8,
     calibration: u8,

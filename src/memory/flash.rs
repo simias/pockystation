@@ -1,7 +1,10 @@
+use rustc_serialize::{Decodable, Encodable, Decoder, Encoder};
+
 use super::Addressable;
 
+#[derive(RustcDecodable, RustcEncodable)]
 pub struct Flash {
-    data: Box<[u8; FLASH_SIZE]>,
+    data: Data,
     /// When true the BIOS is mirrored at address 0. Set on reset so
     /// that the reset vector starts executing from the BIOS.
     bios_at_0: bool,
@@ -25,7 +28,7 @@ impl Flash {
         }
 
         Some(Flash {
-            data: data,
+            data: Data(data),
             bios_at_0: true,
             bank_en: 0,
             bank_map: [0; 16],
@@ -88,12 +91,65 @@ impl Flash {
         self.bios_at_0
     }
 
+    pub fn data(&self) -> &Data {
+        &self.data
+    }
+
+    pub fn set_data(&mut self, data: Data) {
+        self.data = data
+    }
+
     fn set_f_ctrl<A: Addressable>(&mut self, val: u32) {
         self.f_ctrl = val as u8;
 
         if val == 0x03 {
             self.bios_at_0 = false;
         }
+    }
+}
+
+/// Wrapper around the raw flash contents for serialization
+pub struct Data(Box<[u8; FLASH_SIZE]>);
+
+impl ::std::ops::Deref for Data {
+    type Target = [u8; FLASH_SIZE];
+
+    fn deref(&self) -> &[u8; FLASH_SIZE] {
+        &self.0
+    }
+}
+
+impl Encodable for Data {
+    fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
+        // I'm not really sure what to do here, storing the entire
+        // flash contents in a savestate is probably a bad idea since
+        // you'd lose all progress if you load an old save, especially
+        // if you use the same memory card image to play the game on a
+        // PlayStation emu. I guess savestates should be used with a
+        // lot of precautions with this emulator...
+        s.emit_nil()
+    }
+}
+
+impl Decodable for Data {
+    fn decode<D: Decoder>(d: &mut D) -> Result<Data, D::Error> {
+        try!(d.read_nil());
+
+        // Create a dummy FLASH with garbage contents, the frontend
+        // will have to reload it with the real contents.
+        Ok(Data(Box::new([0xba; FLASH_SIZE])))
+    }
+}
+
+impl ::std::clone::Clone for Data {
+    fn clone(&self) -> Data {
+        let mut data = box_array![0u8; FLASH_SIZE];
+
+        for (a, b) in data.iter_mut().zip(self.0.iter()) {
+            *a = *b;
+        }
+
+        Data(data)
     }
 }
 

@@ -6,6 +6,7 @@ use memory::{Interconnect, Word, HalfWord, Byte};
 mod armv4_is;
 mod thumbv1_is;
 
+#[derive(RustcDecodable, RustcEncodable)]
 pub struct Cpu {
     /// Negative condition flag
     n: bool,
@@ -586,6 +587,7 @@ impl fmt::Display for RegisterIndex {
 }
 
 /// CPU modes
+#[derive(RustcDecodable, RustcEncodable)]
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum Mode {
     User       = 0b10000,
