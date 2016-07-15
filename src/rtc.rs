@@ -174,9 +174,8 @@ impl Rtc {
         self.adjust = ((val >> 1) & 7) as u8;
     }
 
-    fn set_adjust(&mut self, val: u32) {
-        debug!("RTC Adjust {:x}: {:x} skip: {}", self.adjust, val, self.skip);
-
+    fn set_adjust(&mut self, _val: u32) {
+        // XXX ugly hack, fix me.
         if self.skip {
             self.skip = false;
             return;

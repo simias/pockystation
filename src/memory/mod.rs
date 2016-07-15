@@ -126,6 +126,7 @@ impl Interconnect {
                 } else {
                     self.ram.load::<A>(offset)
                 },
+            0x02 => self.flash.load_virtual::<A>(offset),
             0x04 => self.bios.load::<A>(offset),
             0x06 => self.flash.load_config::<A>(offset),
             0x08 => self.flash.load_raw::<A>(offset),
