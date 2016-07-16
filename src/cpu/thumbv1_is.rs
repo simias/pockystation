@@ -593,6 +593,129 @@ fn op18x_str_ri5(instruction: Instruction, cpu: &mut Cpu) {
     cpu.store32(addr, val);
 }
 
+fn op1ax_ldr_ri5(instruction: Instruction, cpu: &mut Cpu) {
+    let rd     = instruction.reg_0();
+    let rn     = instruction.reg_3();
+    let offset = instruction.imm5() << 2;
+
+    let base = cpu.reg(rn);
+
+    let addr = base.wrapping_add(offset);
+
+    let val = cpu.load32(addr);
+
+    cpu.set_reg(rd, val);
+}
+
+fn op1cx_strb_ri5(instruction: Instruction, cpu: &mut Cpu) {
+    let rd     = instruction.reg_0();
+    let rn     = instruction.reg_3();
+    let offset = instruction.imm5();
+
+    let addr = cpu.reg(rn).wrapping_add(offset);
+
+    let val = cpu.reg(rd);
+
+    cpu.store8(addr, val);
+}
+
+fn op1ex_ldrb_ri5(instruction: Instruction, cpu: &mut Cpu) {
+    let rd     = instruction.reg_0();
+    let rn     = instruction.reg_3();
+    let offset = instruction.imm5();
+
+    let addr = cpu.reg(rn).wrapping_add(offset);
+
+    let val = cpu.load8(addr);
+
+    cpu.set_reg(rd, val as u32);
+}
+
+fn op20x_strh_ri5(instruction: Instruction, cpu: &mut Cpu) {
+    let rd     = instruction.reg_0();
+    let rn     = instruction.reg_3();
+    let offset = instruction.imm5() << 1;
+
+    let addr = cpu.reg(rn).wrapping_add(offset);
+
+    if (addr & 1) != 0 {
+        panic!("Unpredictable STRH");
+    }
+
+    let val = cpu.reg(rd);
+
+    cpu.store16(addr, val);
+}
+
+fn op22x_ldrh_ri5(instruction: Instruction, cpu: &mut Cpu) {
+    let rd     = instruction.reg_0();
+    let rn     = instruction.reg_3();
+    let offset = instruction.imm5() << 1;
+
+    let addr = cpu.reg(rn).wrapping_add(offset);
+
+    let val = cpu.load16(addr);
+
+    cpu.set_reg(rd, val as u32);
+}
+
+fn op24x_str_sp(instruction: Instruction, cpu: &mut Cpu) {
+    let rd  = instruction.reg_8();
+    let imm = instruction.imm8() << 2;
+
+    let sp = RegisterIndex(13);
+
+    let addr = cpu.reg(sp).wrapping_add(imm);
+
+    let val = cpu.reg(rd);
+
+    cpu.store32(addr, val);
+}
+
+fn op26x_ldr_sp(instruction: Instruction, cpu: &mut Cpu) {
+    let rd  = instruction.reg_8();
+    let imm = instruction.imm8() << 2;
+
+    let sp = RegisterIndex(13);
+
+    let addr = cpu.reg(sp).wrapping_add(imm);
+
+    let val = cpu.load32(addr);
+
+    cpu.set_reg(rd, val);
+}
+
+fn op28x_add_pc(instruction: Instruction, cpu: &mut Cpu) {
+    let rd  = instruction.reg_8();
+    let offset = instruction.imm8() << 2;
+
+    let pc = RegisterIndex(15);
+
+    let val = cpu.reg(pc).wrapping_add(offset);
+
+    cpu.set_reg(rd, val & !3);
+}
+
+fn op2c0_add_sp(instruction: Instruction, cpu: &mut Cpu) {
+    let offset = instruction.imm7() << 2;
+
+    let sp = RegisterIndex(13);
+
+    let val = cpu.reg(sp);
+
+    cpu.set_reg(sp, val.wrapping_add(offset));
+}
+
+fn op2c2_sub_sp(instruction: Instruction, cpu: &mut Cpu) {
+    let offset = instruction.imm7() << 2;
+
+    let sp = RegisterIndex(13);
+
+    let val = cpu.reg(sp);
+
+    cpu.set_reg(sp, val.wrapping_sub(offset));
+}
+
 fn op2d0_push(instruction: Instruction, cpu: &mut Cpu) {
     let list = instruction.register_list();
 
@@ -821,129 +944,6 @@ fn op38x_b(instruction: Instruction, cpu: &mut Cpu) {
     let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
 
     cpu.set_pc(pc);
-}
-
-fn op1ax_ldr_ri5(instruction: Instruction, cpu: &mut Cpu) {
-    let rd     = instruction.reg_0();
-    let rn     = instruction.reg_3();
-    let offset = instruction.imm5() << 2;
-
-    let base = cpu.reg(rn);
-
-    let addr = base.wrapping_add(offset);
-
-    let val = cpu.load32(addr);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op1cx_strb_ri5(instruction: Instruction, cpu: &mut Cpu) {
-    let rd     = instruction.reg_0();
-    let rn     = instruction.reg_3();
-    let offset = instruction.imm5();
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    let val = cpu.reg(rd);
-
-    cpu.store8(addr, val);
-}
-
-fn op1ex_ldrb_ri5(instruction: Instruction, cpu: &mut Cpu) {
-    let rd     = instruction.reg_0();
-    let rn     = instruction.reg_3();
-    let offset = instruction.imm5();
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    let val = cpu.load8(addr);
-
-    cpu.set_reg(rd, val as u32);
-}
-
-fn op20x_strh_ri5(instruction: Instruction, cpu: &mut Cpu) {
-    let rd     = instruction.reg_0();
-    let rn     = instruction.reg_3();
-    let offset = instruction.imm5() << 1;
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    if (addr & 1) != 0 {
-        panic!("Unpredictable STRH");
-    }
-
-    let val = cpu.reg(rd);
-
-    cpu.store16(addr, val);
-}
-
-fn op22x_ldrh_ri5(instruction: Instruction, cpu: &mut Cpu) {
-    let rd     = instruction.reg_0();
-    let rn     = instruction.reg_3();
-    let offset = instruction.imm5() << 1;
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    let val = cpu.load16(addr);
-
-    cpu.set_reg(rd, val as u32);
-}
-
-fn op24x_str_sp(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.reg_8();
-    let imm = instruction.imm8() << 2;
-
-    let sp = RegisterIndex(13);
-
-    let addr = cpu.reg(sp).wrapping_add(imm);
-
-    let val = cpu.reg(rd);
-
-    cpu.store32(addr, val);
-}
-
-fn op26x_ldr_sp(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.reg_8();
-    let imm = instruction.imm8() << 2;
-
-    let sp = RegisterIndex(13);
-
-    let addr = cpu.reg(sp).wrapping_add(imm);
-
-    let val = cpu.load32(addr);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op28x_add_pc(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.reg_8();
-    let offset = instruction.imm8() << 2;
-
-    let pc = RegisterIndex(15);
-
-    let val = cpu.reg(pc).wrapping_add(offset);
-
-    cpu.set_reg(rd, val & !3);
-}
-
-fn op2c0_add_sp(instruction: Instruction, cpu: &mut Cpu) {
-    let offset = instruction.imm7() << 2;
-
-    let sp = RegisterIndex(13);
-
-    let val = cpu.reg(sp);
-
-    cpu.set_reg(sp, val.wrapping_add(offset));
-}
-
-fn op2c2_sub_sp(instruction: Instruction, cpu: &mut Cpu) {
-    let offset = instruction.imm7() << 2;
-
-    let sp = RegisterIndex(13);
-
-    let val = cpu.reg(sp);
-
-    cpu.set_reg(sp, val.wrapping_sub(offset));
 }
 
 fn op3cx_bl_hi(instruction: Instruction, cpu: &mut Cpu) {

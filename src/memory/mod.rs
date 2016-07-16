@@ -158,6 +158,8 @@ impl Interconnect {
                     0...0x1ff => self.lcd.load::<A>(offset),
                     // XXX Figure out what this register is exactly
                     0x800004 => 0,
+                    // XXX Figure out what this register is exactly
+                    0x80000c => 0,
                     0x800010 => self.dac.load::<A>(0),
                     0x800014 => self.dac.load::<A>(4),
                     _ => unimplemented(),

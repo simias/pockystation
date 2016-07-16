@@ -62,6 +62,9 @@ impl Flash {
             // XXX Run tests on real hardware to figure out what's
             // read from here exactly.
             0x00 => (self.f_ctrl | 1) as u32,
+            // XXX figure out what this register does exactly, No$
+            // calls it "F_STAT".
+            0x04 => 0,
             0x08 => self.phys_bank_en as u32,
             // F_CAL. XXX Need to dump a value from a real
             // PocketStation.

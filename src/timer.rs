@@ -76,6 +76,7 @@ impl Timer {
         }
 
         match offset {
+            8 => self.mode() as u32,
             _ => panic!("Unhandled timer register {:x}", offset),
         }
     }
@@ -92,6 +93,10 @@ impl Timer {
             3 => 1,
             _ => unreachable!(),
         }
+    }
+
+    fn mode(&self) -> u8 {
+        self.divider | ((self.enabled as u8) << 2)
     }
 
     fn set_mode(&mut self, val: u8) {

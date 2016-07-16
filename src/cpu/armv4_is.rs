@@ -458,11 +458,22 @@ fn op150_cmp_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
+fn op181_orr_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = instruction.mode1_register_lshift_reg_no_carry(cpu);
+
+    let a = cpu.reg(rn);
+
+    let val = a | b;
+
+    cpu.set_reg(rd, val);
+}
 
 fn op19b_ldrh_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let rm     = instruction.rm();
-    let rd     = instruction.rd();
-    let rn     = instruction.rn();
+    let rm = instruction.rm();
+    let rd = instruction.rd();
+    let rn = instruction.rn();
 
     let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
 
@@ -472,10 +483,10 @@ fn op19b_ldrh_pu(instruction: Instruction, cpu: &mut Cpu) {
 }
 
 fn op1a0_mov_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
+    let rd  = instruction.rd();
     let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
 
-    cpu.set_reg(dst, val);
+    cpu.set_reg(rd, val);
 }
 
 fn op1a2_mov_lsr_i(instruction: Instruction, cpu: &mut Cpu) {
@@ -486,10 +497,10 @@ fn op1a2_mov_lsr_i(instruction: Instruction, cpu: &mut Cpu) {
 }
 
 fn op1b0_mov_lsl_is(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
+    let rd = instruction.rd();
     let (val, carry) = instruction.mode1_register_lshift_imm(cpu);
 
-    cpu.set_reg(dst, val);
+    cpu.set_reg(rd, val);
 
     cpu.set_n((val as i32) < 0);
     cpu.set_z(val == 0);
@@ -497,17 +508,17 @@ fn op1b0_mov_lsl_is(instruction: Instruction, cpu: &mut Cpu) {
 }
 
 fn op1a1_mov_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
+    let rd  = instruction.rd();
     let val = instruction.mode1_register_lshift_reg_no_carry(cpu);
 
-    cpu.set_reg(dst, val);
+    cpu.set_reg(rd, val);
 }
 
 fn op1a3_mov_lsr_r(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
+    let rd  = instruction.rd();
     let val = instruction.mode1_register_rshift_reg_no_carry(cpu);
 
-    cpu.set_reg(dst, val);
+    cpu.set_reg(rd, val);
 }
 
 fn op1cb_strh_pui(instruction: Instruction, cpu: &mut Cpu) {
@@ -535,30 +546,30 @@ fn op1db_ldrh_pui(instruction: Instruction, cpu: &mut Cpu) {
 }
 
 fn op1e0_mvn_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
+    let rd  = instruction.rd();
     let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
 
-    cpu.set_reg(dst, !val);
+    cpu.set_reg(rd, !val);
 }
 
 fn op20x_and_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_imm_no_carry();
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = instruction.mode1_imm_no_carry();
 
     let a = cpu.reg(rn);
 
     let val = a & b;
 
-    cpu.set_reg(dst, val);
+    cpu.set_reg(rd, val);
 }
 
 fn op21x_and_is(instruction: Instruction, cpu: &mut Cpu) {
-    let dst        = instruction.rd();
+    let rd         = instruction.rd();
     let rn         = instruction.rn();
     let (b, carry) = instruction.mode1_imm(cpu);
 
-    if dst.is_pc() {
+    if rd.is_pc() {
         // Should put CPSR in SPSR for some reason
         panic!("Unimplemented AND {}", instruction);
     }
@@ -567,11 +578,23 @@ fn op21x_and_is(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = a & b;
 
-    cpu.set_reg(dst, val);
+    cpu.set_reg(rd, val);
 
     cpu.set_n((val as i32) < 0);
     cpu.set_z(val == 0);
     cpu.set_c(carry);
+}
+
+fn op22x_eor_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = instruction.mode1_imm_no_carry();
+
+    let a = cpu.reg(rn);
+
+    let val = a ^ b;
+
+    cpu.set_reg(rd, val);
 }
 
 fn op24x_sub_i(instruction: Instruction, cpu: &mut Cpu) {
@@ -1142,7 +1165,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x180
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    unimplemented, op181_orr_lsl_r, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1202,10 +1225,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     op21x_and_is, op21x_and_is, op21x_and_is, op21x_and_is,
 
     // 0x220
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
+    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
+    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
+    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
 
     // 0x230
     unimplemented, unimplemented, unimplemented, unimplemented,
