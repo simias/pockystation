@@ -66,6 +66,15 @@ impl Flash {
             // calls it "F_STAT".
             0x04 => 0,
             0x08 => self.phys_bank_en as u32,
+            0x100...0x13c => {
+                let phys_bank = (offset & 0x3f) >> 2;
+
+                self.phys_to_virt_bank[phys_bank as usize] as u32
+            }
+            // F_SN_LO, XXX dump it from real pocketstation
+            0x300 => 0,
+            // F_SN_HI, XXX dump it from real pocketstation
+            0x302 => 0,
             // F_CAL. XXX Need to dump a value from a real
             // PocketStation.
             0x308 => 0xca1,

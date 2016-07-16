@@ -103,6 +103,39 @@ impl Instruction {
         val << shift
     }
 
+    /// Addressing mode 1: Logical shift right by immediate.
+    fn mode1_register_rshift_imm(self, cpu: &Cpu) -> (u32, bool) {
+        let shift = (self.0 >> 7) & 0x1f;
+        let rm    = self.rm();
+
+        let val = cpu.reg(rm);
+
+        match shift {
+            // Shift 0 means shift by 32
+            0 => (0, (val as i32) < 0),
+            _ => {
+                let carry = (val >> (shift - 1)) & 1 != 0;
+
+                (val >> shift, carry)
+            }
+        }
+    }
+
+    /// Addressing mode 1: Logical shift right by immediate. Used when
+    /// shifter carry is not needed.
+    fn mode1_register_rshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
+        let shift = (self.0 >> 7) & 0x1f;
+        let rm    = self.rm();
+
+        let val = cpu.reg(rm);
+
+        match shift {
+            // Shift 0 means shift by 32
+            0 => 0,
+            _ => val >> shift
+        }
+    }
+
     /// Addressing mode 1: Logical shift left by register. Used when
     /// shifter carry is not needed.
     fn mode1_register_lshift_reg_no_carry(self, cpu: &Cpu) -> u32 {
@@ -116,17 +149,6 @@ impl Instruction {
             0...31 => val << shift,
             _ => 0,
         }
-    }
-
-    /// Addressing mode 1: Logical shift right by immediate. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_rshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        val >> shift
     }
 
     /// Addressing mode 1: Logical shift right by register. Used when
@@ -203,7 +225,7 @@ impl Instruction {
         let rn   = self.rn();
         let list = self.register_list();
 
-        let first = true;
+        let mut first = true;
 
         let mut addr = start_addr;
 
@@ -222,6 +244,7 @@ impl Instruction {
                 cpu.store32(addr, val);
 
                 addr = addr.wrapping_add(4);
+                first = false;
             }
         }
 
@@ -499,6 +522,17 @@ fn op1a2_mov_lsr_i(instruction: Instruction, cpu: &mut Cpu) {
 fn op1b0_mov_lsl_is(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.rd();
     let (val, carry) = instruction.mode1_register_lshift_imm(cpu);
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(carry);
+}
+
+fn op1b2_mov_lsr_is(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.rd();
+    let (val, carry) = instruction.mode1_register_rshift_imm(cpu);
 
     cpu.set_reg(rd, val);
 
@@ -1183,9 +1217,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1b0
-    op1b0_mov_lsl_is, unimplemented, unimplemented, unimplemented,
+    op1b0_mov_lsl_is, unimplemented, op1b2_mov_lsr_is, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op1b0_mov_lsl_is, unimplemented, unimplemented, unimplemented,
+    op1b0_mov_lsl_is, unimplemented, op1b2_mov_lsr_is, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1c0

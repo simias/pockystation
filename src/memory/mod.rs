@@ -26,6 +26,7 @@ pub struct Interconnect {
     irda: Irda,
     cpu_clk_div: u8,
     frame_ticks: u32,
+    iop_ctrl: u8,
 }
 
 impl Interconnect {
@@ -44,6 +45,7 @@ impl Interconnect {
             irda: Irda::new(),
             cpu_clk_div: 7,
             frame_ticks: 0,
+            iop_ctrl: 0,
         }
     }
 
@@ -156,6 +158,7 @@ impl Interconnect {
             0x0d =>
                 match offset {
                     0...0x1ff => self.lcd.load::<A>(offset),
+                    0x800000 => self.iop_ctrl as u32,
                     // XXX Figure out what this register is exactly
                     0x800004 => 0,
                     // XXX Figure out what this register is exactly
@@ -217,7 +220,10 @@ impl Interconnect {
             0x0d =>
                 match offset {
                     0...0x1ff => self.lcd.store::<A>(offset, val),
-                    0x800000 => println!("IOP CTRL 0x{:08x}", val),
+                    0x800000 => {
+                        println!("IOP CTRL 0x{:08x}", val);
+                        self.iop_ctrl = val as u8;
+                    }
                     0x800004 => println!("IOP STOP 0x{:08x}", val),
                     0x800008 => println!("IOP START 0x{:08x}", val),
                     0x800010 => self.dac.store::<A>(0, val),

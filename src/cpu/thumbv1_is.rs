@@ -142,10 +142,10 @@ impl fmt::Display for Instruction {
 }
 
 fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
-    panic!("{:?}Unimplemented instruction {} ({:03x})",
-           cpu,
+    panic!("Unimplemented instruction {} ({:03x})\n{:?}",
            instruction,
-           instruction.opcode());
+           instruction.opcode(),
+           cpu);
 }
 
 fn op00x_lsl_ri5(instruction: Instruction, cpu: &mut Cpu) {
@@ -424,6 +424,85 @@ fn op103_lsr_r(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
+fn op104_asr_r(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.reg_0();
+    let rs = instruction.reg_3();
+
+    let shift = cpu.reg(rs) & 0xff;
+    let val = cpu.reg(rd);
+
+    let val =
+        match shift {
+            0 => val,
+            1...31 => {
+                let carry = (val >> (shift - 1)) & 1 != 0;
+
+                cpu.set_c(carry);
+                ((val as i32) >> shift) as u32
+            }
+            _ => {
+                let carry = (val >> 31) & 1 != 0;
+
+                cpu.set_c(carry);
+                ((val as i32) >> 31) as u32
+            }
+        };
+
+    cpu.set_reg(rd, val);
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+}
+
+fn op105_adc_rr(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.reg_0();
+    let rm = instruction.reg_3();
+
+    let a = cpu.reg(rd);
+    let b = cpu.reg(rm);
+
+    // Add with carry
+    let val = a.wrapping_add(b).wrapping_add(cpu.c() as u32);
+
+    let a_neg = (a as i32) < 0;
+    let b_neg = (b as i32) < 0;
+    let v_neg = (val as i32) < 0;
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n(v_neg);
+    cpu.set_z(val == 0);
+    cpu.set_c(val < a);
+    cpu.set_v((a_neg == b_neg) & (a_neg ^ v_neg));
+}
+
+fn op107_ror(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.reg_0();
+    let rs = instruction.reg_3();
+
+    let rot = cpu.reg(rs);
+    let val = cpu.reg(rd);
+
+    let val =
+        if (rot & 0xff) == 0 {
+            val
+        } else if (rot & 0x1f) == 0 {
+            let carry = (val >> 31) & 1 != 0;
+
+            cpu.set_c(carry);
+            val
+        } else {
+            let rot = rot & 0x1f;
+
+            let carry = (val >> (rot - 1)) & 1 != 0;
+
+            cpu.set_c(carry);
+            val.rotate_right(rot)
+        };
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+}
+
 fn op108_tst(instruction: Instruction, cpu: &mut Cpu) {
     let rn = instruction.reg_0();
     let rm = instruction.reg_3();
@@ -486,6 +565,18 @@ fn op10d_mul(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
+fn op10e_bic(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.reg_0();
+    let rm = instruction.reg_3();
+
+    let val = cpu.reg(rd) & !cpu.reg(rm);
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+}
+
 fn op10f_mvn(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rm = instruction.reg_3();
@@ -495,6 +586,18 @@ fn op10f_mvn(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
     cpu.set_n((val as i32) < 0);
     cpu.set_z(val == 0);
+}
+
+fn op111_add_hi(instruction: Instruction, cpu: &mut Cpu) {
+    let rm = instruction.rm_full();
+    let rd = instruction.rd_full();
+
+    let a = cpu.reg(rd);
+    let b = cpu.reg(rm);
+
+    let val = a.wrapping_add(b);
+
+    cpu.set_reg(rd, val);
 }
 
 fn op11c_bx(instruction: Instruction, cpu: &mut Cpu) {
@@ -555,6 +658,18 @@ fn op14x_str_rr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.store32(addr, val);
 }
 
+fn op15x_ldrsb_rr(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.reg_0();
+    let rn = instruction.reg_3();
+    let rm = instruction.reg_6();
+
+    let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
+
+    let val = cpu.load8(addr) as i8;
+
+    cpu.set_reg(rd, val as u32);
+}
+
 fn op16x_ldr_rr(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
@@ -565,6 +680,18 @@ fn op16x_ldr_rr(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.load32(addr);
 
     cpu.set_reg(rd, val);
+}
+
+fn op16x_ldrh_rr(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.reg_0();
+    let rn = instruction.reg_3();
+    let rm = instruction.reg_6();
+
+    let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
+
+    let val = cpu.load16(addr);
+
+    cpu.set_reg(rd, val as u32);
 }
 
 fn op17x_ldrsh_rr(instruction: Instruction, cpu: &mut Cpu) {
@@ -694,6 +821,17 @@ fn op28x_add_pc(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.reg(pc).wrapping_add(offset);
 
     cpu.set_reg(rd, val & !3);
+}
+
+fn op2ax_add_sp_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rd     = instruction.reg_8();
+    let offset = instruction.imm8() << 2;
+
+    let sp = RegisterIndex(13);
+
+    let val = cpu.reg(sp);
+
+    cpu.set_reg(rd, val.wrapping_add(offset));
 }
 
 fn op2c0_add_sp(instruction: Instruction, cpu: &mut Cpu) {
@@ -834,6 +972,62 @@ fn op2f4_pop_pc(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(sp, addr);
 }
 
+fn op30x_stmia(instruction: Instruction, cpu: &mut Cpu) {
+    let list = instruction.register_list();
+    let rn   = instruction.reg_8();
+
+    let mut addr = cpu.reg(rn);
+
+    let mut first = true;
+
+    for i in 0..8 {
+        if ((list >> i) & 1) != 0 {
+            let reg = RegisterIndex(i);
+
+            // If Rn is specified in the register_list and it's the
+            // first entry then the original value is stored,
+            // otherwise it's "unpredictable".
+            if !first && reg == rn {
+                panic!("Unpredictable STM! {}", instruction);
+            }
+
+            let val = cpu.reg(reg);
+            cpu.store32(addr, val);
+
+            addr = addr.wrapping_add(4);
+            first = false;
+        }
+    }
+
+    cpu.set_reg(rn, addr);
+}
+
+fn op32x_ldmia(instruction: Instruction, cpu: &mut Cpu) {
+    let list = instruction.register_list();
+    let rn   = instruction.reg_8();
+
+    let num_regs = list.count_ones();
+    let mut addr = cpu.reg(rn);
+
+    // If Rn is present in the list the final value is the loaded
+    // value, not the writeback.
+    let end_address = addr + 4 * num_regs;
+
+    cpu.set_reg(rn, end_address);
+
+    for i in 0..8 {
+        if ((list >> i) & 1) != 0 {
+            let reg = RegisterIndex(i);
+
+            let val = cpu.load32(addr);
+
+            cpu.set_reg(reg, val);
+
+            addr = addr.wrapping_add(4);
+        }
+    }
+}
+
 fn op340_beq(instruction: Instruction, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
@@ -888,6 +1082,16 @@ fn op360_bhi(instruction: Instruction, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if cpu.c() && !cpu.z() {
+        let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
+
+        cpu.set_pc(pc);
+    }
+}
+
+fn op364_bls(instruction: Instruction, cpu: &mut Cpu) {
+    let offset = instruction.signed_imm8() << 1;
+
+    if !cpu.c() || cpu.z() {
         let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
 
         cpu.set_pc(pc);
@@ -1077,12 +1281,12 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
 
     // 0x100
     op100_and, op101_eor, op102_lsl_r, op103_lsr_r,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op104_asr_r, op105_adc_rr, unimplemented, op107_ror,
     op108_tst, op109_neg, op10a_cmp, unimplemented,
-    op10c_orr, op10d_mul, unimplemented, op10f_mvn,
+    op10c_orr, op10d_mul, op10e_bic, op10f_mvn,
 
     // 0x110
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    unimplemented, op111_add_hi, op111_add_hi, op111_add_hi,
     unimplemented, unimplemented, unimplemented, unimplemented,
     op118_cpy, op118_cpy, op118_cpy, op118_cpy,
     op11c_bx, op11c_bx, unimplemented, unimplemented,
@@ -1108,14 +1312,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
     // 0x150
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op15x_ldrsb_rr, op15x_ldrsb_rr, op15x_ldrsb_rr, op15x_ldrsb_rr,
+    op15x_ldrsb_rr, op15x_ldrsb_rr, op15x_ldrsb_rr, op15x_ldrsb_rr,
 
     // 0x160
     op16x_ldr_rr, op16x_ldr_rr, op16x_ldr_rr, op16x_ldr_rr,
     op16x_ldr_rr, op16x_ldr_rr, op16x_ldr_rr, op16x_ldr_rr,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op16x_ldrh_rr, op16x_ldrh_rr, op16x_ldrh_rr, op16x_ldrh_rr,
+    op16x_ldrh_rr, op16x_ldrh_rr, op16x_ldrh_rr, op16x_ldrh_rr,
 
     // 0x170
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1232,16 +1436,16 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
     op28x_add_pc, op28x_add_pc, op28x_add_pc, op28x_add_pc,
 
     // 0x2a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i,
+    op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i,
+    op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i,
+    op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i,
 
     // 0x2b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i,
+    op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i,
+    op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i,
+    op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i, op2ax_add_sp_i,
 
     // 0x2c0
     op2c0_add_sp, op2c0_add_sp, op2c2_sub_sp, op2c2_sub_sp,
@@ -1268,28 +1472,28 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x300
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op30x_stmia, op30x_stmia, op30x_stmia, op30x_stmia,
+    op30x_stmia, op30x_stmia, op30x_stmia, op30x_stmia,
+    op30x_stmia, op30x_stmia, op30x_stmia, op30x_stmia,
+    op30x_stmia, op30x_stmia, op30x_stmia, op30x_stmia,
 
     // 0x310
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op30x_stmia, op30x_stmia, op30x_stmia, op30x_stmia,
+    op30x_stmia, op30x_stmia, op30x_stmia, op30x_stmia,
+    op30x_stmia, op30x_stmia, op30x_stmia, op30x_stmia,
+    op30x_stmia, op30x_stmia, op30x_stmia, op30x_stmia,
 
     // 0x320
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op32x_ldmia, op32x_ldmia, op32x_ldmia, op32x_ldmia,
+    op32x_ldmia, op32x_ldmia, op32x_ldmia, op32x_ldmia,
+    op32x_ldmia, op32x_ldmia, op32x_ldmia, op32x_ldmia,
+    op32x_ldmia, op32x_ldmia, op32x_ldmia, op32x_ldmia,
 
     // 0x330
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op32x_ldmia, op32x_ldmia, op32x_ldmia, op32x_ldmia,
+    op32x_ldmia, op32x_ldmia, op32x_ldmia, op32x_ldmia,
+    op32x_ldmia, op32x_ldmia, op32x_ldmia, op32x_ldmia,
+    op32x_ldmia, op32x_ldmia, op32x_ldmia, op32x_ldmia,
 
     // 0x340
     op340_beq, op340_beq, op340_beq, op340_beq,
@@ -1305,7 +1509,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
 
     // 0x360
     op360_bhi, op360_bhi, op360_bhi, op360_bhi,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op364_bls, op364_bls, op364_bls, op364_bls,
     op368_bge, op368_bge, op368_bge, op368_bge,
     op36c_blt, op36c_blt, op36c_blt, op36c_blt,
 
