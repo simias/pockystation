@@ -380,6 +380,18 @@ fn op080_add_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(dst, val);
 }
 
+fn op100_mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.rd();
+
+    if (instruction.0 & 0xf0fff) != 0xf0000 {
+        panic!("Invalid MRS instruction {}", instruction);
+    }
+
+    let cpsr = cpu.cpsr();
+
+    cpu.set_reg(rd, cpsr);
+}
+
 fn op120_msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     let rm   = instruction.rm();
     let mask = instruction.msr_field_mask();
@@ -445,6 +457,7 @@ fn op150_cmp_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_c(a >= b);
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
+
 
 fn op19b_ldrh_pu(instruction: Instruction, cpu: &mut Cpu) {
     let rm     = instruction.rm();
@@ -646,11 +659,54 @@ fn op35x_cmp_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
+fn op38x_orr_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = instruction.mode1_imm_no_carry();
+
+    let a = cpu.reg(rn);
+
+    let val = a | b;
+
+    cpu.set_reg(rd, val);
+}
+
 fn op3ax_mov_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
+    let rd  = instruction.rd();
+    let rn  = instruction.rn();
     let val = instruction.mode1_imm_no_carry();
 
-    cpu.set_reg(dst, val);
+    if rn != RegisterIndex(0) {
+        // "should be zero"
+        panic!("MOV instruction with non-0 Rn");
+    }
+
+    cpu.set_reg(rd, val);
+}
+
+fn op3cx_bic_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = instruction.mode1_imm_no_carry();
+
+    let a = cpu.reg(rn);
+
+    let val = a & !b;
+
+    cpu.set_reg(rd, val);
+}
+
+fn op3ex_mvn_i(instruction: Instruction, cpu: &mut Cpu) {
+    let dst = instruction.rd();
+    let rn = instruction.rn();
+    let val = instruction.mode1_imm_no_carry();
+
+    if rn != RegisterIndex(0) {
+        // "should be zero"
+        panic!("MVN instruction with non-0 Rn");
+    }
+
+    cpu.set_reg(dst, !val);
 }
 
 fn op48x_str_u(instruction: Instruction, cpu: &mut Cpu) {
@@ -1026,7 +1082,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x100
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op100_mrs_cpsr, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1266,10 +1322,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x380
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op38x_orr_i, op38x_orr_i, op38x_orr_i, op38x_orr_i,
+    op38x_orr_i, op38x_orr_i, op38x_orr_i, op38x_orr_i,
+    op38x_orr_i, op38x_orr_i, op38x_orr_i, op38x_orr_i,
+    op38x_orr_i, op38x_orr_i, op38x_orr_i, op38x_orr_i,
 
     // 0x390
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1290,10 +1346,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x3c0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
+    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
+    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
+    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
 
     // 0x3d0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1302,10 +1358,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x3e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
+    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
+    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
+    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
 
     // 0x3f0
     unimplemented, unimplemented, unimplemented, unimplemented,
