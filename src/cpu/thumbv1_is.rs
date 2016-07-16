@@ -658,6 +658,18 @@ fn op14x_str_rr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.store32(addr, val);
 }
 
+fn op15x_strb_rr(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.reg_0();
+    let rn = instruction.reg_3();
+    let rm = instruction.reg_6();
+
+    let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
+
+    let val = cpu.reg(rd);
+
+    cpu.store8(addr, val);
+}
+
 fn op15x_ldrsb_rr(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
@@ -690,6 +702,18 @@ fn op16x_ldrh_rr(instruction: Instruction, cpu: &mut Cpu) {
     let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
 
     let val = cpu.load16(addr);
+
+    cpu.set_reg(rd, val as u32);
+}
+
+fn op17x_ldrb_rr(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.reg_0();
+    let rn = instruction.reg_3();
+    let rm = instruction.reg_6();
+
+    let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
+
+    let val = cpu.load8(addr);
 
     cpu.set_reg(rd, val as u32);
 }
@@ -1310,8 +1334,8 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x150
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op15x_strb_rr, op15x_strb_rr, op15x_strb_rr, op15x_strb_rr,
+    op15x_strb_rr, op15x_strb_rr, op15x_strb_rr, op15x_strb_rr,
     op15x_ldrsb_rr, op15x_ldrsb_rr, op15x_ldrsb_rr, op15x_ldrsb_rr,
     op15x_ldrsb_rr, op15x_ldrsb_rr, op15x_ldrsb_rr, op15x_ldrsb_rr,
 
@@ -1322,8 +1346,8 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
     op16x_ldrh_rr, op16x_ldrh_rr, op16x_ldrh_rr, op16x_ldrh_rr,
 
     // 0x170
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op17x_ldrb_rr, op17x_ldrb_rr, op17x_ldrb_rr, op17x_ldrb_rr,
+    op17x_ldrb_rr, op17x_ldrb_rr, op17x_ldrb_rr, op17x_ldrb_rr,
     op17x_ldrsh_rr, op17x_ldrsh_rr, op17x_ldrsh_rr, op17x_ldrsh_rr,
     op17x_ldrsh_rr, op17x_ldrsh_rr, op17x_ldrsh_rr, op17x_ldrsh_rr,
 
