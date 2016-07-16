@@ -801,6 +801,18 @@ fn op5cx_strb_pu(instruction: Instruction, cpu: &mut Cpu) {
     cpu.store8(addr, val);
 }
 
+fn op5dx_ldrb_pu(instruction: Instruction, cpu: &mut Cpu) {
+    let dst    = instruction.rd();
+    let base   = instruction.rn();
+    let offset = instruction.mode2_offset_imm();
+
+    let addr = cpu.reg(base).wrapping_add(offset);
+
+    let val = cpu.load8(addr);
+
+    cpu.set_reg_pc_mask(dst, val as u32);
+}
+
 fn op780_str_ipu(instruction: Instruction, cpu: &mut Cpu) {
     let src    = instruction.rd();
     let base   = instruction.rn();
@@ -1544,10 +1556,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
 
     // 0x5d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
+    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
+    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
+    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
 
     // 0x5e0
     unimplemented, unimplemented, unimplemented, unimplemented,
