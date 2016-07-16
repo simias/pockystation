@@ -189,6 +189,15 @@ impl Interconnect {
                     self.ram.store::<A>(offset, val);
                 },
             0x06 => self.flash.store_config::<A>(offset, val),
+            0x08 => {
+                match offset {
+                    // F_KEY1
+                    0x2a54 => (),
+                    // F_KEY2
+                    0x55aa => (),
+                    _ => self.flash.store_raw::<A>(offset, val),
+                }
+            }
             0x0a =>
                 match offset {
                     0x00...0x10 => self.irq_controller.store::<A>(offset, val),

@@ -65,6 +65,8 @@ impl Flash {
             // XXX figure out what this register does exactly, No$
             // calls it "F_STAT".
             0x04 => 0,
+            0x0c => self.f_wait1 as u32,
+            0x10 => (self.f_wait2 | 4) as u32,
             0x08 => self.phys_bank_en as u32,
             0x100...0x13c => {
                 let phys_bank = (offset & 0x3f) >> 2;
@@ -114,6 +116,14 @@ impl Flash {
         }
 
         r
+    }
+
+    pub fn store_raw<A: Addressable>(&mut self, offset: u32, val: u32) {
+        let offset = offset as usize;
+
+        for i in 0..A::size() as usize {
+            self.data[offset + i] = (val >> (i * 8)) as u8;
+        }
     }
 
     pub fn load_virtual<A: Addressable>(&self, offset: u32) -> u32 {
@@ -183,6 +193,12 @@ impl ::std::ops::Deref for Data {
 
     fn deref(&self) -> &[u8; FLASH_SIZE] {
         &self.0
+    }
+}
+
+impl ::std::ops::DerefMut for Data {
+    fn deref_mut(&mut self) -> &mut[u8; FLASH_SIZE] {
+        &mut self.0
     }
 }
 
