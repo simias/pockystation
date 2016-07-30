@@ -136,6 +136,26 @@ impl Instruction {
         }
     }
 
+    /// Addressing mode 1: Logical shift right by immediate. Used when
+    /// shifter carry is not needed.
+    fn mode1_register_arshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
+        let shift = (self.0 >> 7) & 0x1f;
+        let rm    = self.rm();
+
+        let val = cpu.reg(rm) as i32;
+
+        let val =
+            match shift {
+                // Shift 0 means shift by 32, which is like shifting
+                // by 31 when using a signed value (i.e. the sign bit
+                // is replicated all over the 32bits)
+                0 => val >> 31,
+                _ => val >> shift
+            };
+
+        val as u32
+    }
+
     /// Addressing mode 1: Logical shift left by register. Used when
     /// shifter carry is not needed.
     fn mode1_register_lshift_reg_no_carry(self, cpu: &Cpu) -> u32 {
@@ -481,6 +501,18 @@ fn op150_cmp_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
+fn op180_orr_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = instruction.mode1_register_lshift_imm_no_carry(cpu);
+
+    let a = cpu.reg(rn);
+
+    let val = a | b;
+
+    cpu.set_reg(rd, val);
+}
+
 fn op181_orr_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.rd();
     let rn = instruction.rn();
@@ -512,9 +544,30 @@ fn op1a0_mov_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
+fn op1a1_mov_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
+    let rd  = instruction.rd();
+    let val = instruction.mode1_register_lshift_reg_no_carry(cpu);
+
+    cpu.set_reg(rd, val);
+}
+
 fn op1a2_mov_lsr_i(instruction: Instruction, cpu: &mut Cpu) {
     let dst = instruction.rd();
     let val = instruction.mode1_register_rshift_imm_no_carry(cpu);
+
+    cpu.set_reg(dst, val);
+}
+
+fn op1a3_mov_lsr_r(instruction: Instruction, cpu: &mut Cpu) {
+    let rd  = instruction.rd();
+    let val = instruction.mode1_register_rshift_reg_no_carry(cpu);
+
+    cpu.set_reg(rd, val);
+}
+
+fn op1a4_mov_asr_i(instruction: Instruction, cpu: &mut Cpu) {
+    let dst = instruction.rd();
+    let val = instruction.mode1_register_arshift_imm_no_carry(cpu);
 
     cpu.set_reg(dst, val);
 }
@@ -541,16 +594,14 @@ fn op1b2_mov_lsr_is(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_c(carry);
 }
 
-fn op1a1_mov_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
+fn op1c0_bic_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     let rd  = instruction.rd();
-    let val = instruction.mode1_register_lshift_reg_no_carry(cpu);
+    let rn  = instruction.rn();
+    let b   = instruction.mode1_register_lshift_imm_no_carry(cpu);
 
-    cpu.set_reg(rd, val);
-}
+    let a = cpu.reg(rn);
 
-fn op1a3_mov_lsr_r(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let val = instruction.mode1_register_rshift_reg_no_carry(cpu);
+    let val = a & !b;
 
     cpu.set_reg(rd, val);
 }
@@ -575,6 +626,18 @@ fn op1db_ldrh_pui(instruction: Instruction, cpu: &mut Cpu) {
     let addr = cpu.reg(rn).wrapping_add(offset);
 
     let val = cpu.load16(addr);
+
+    cpu.set_reg(rd, val as u32)
+}
+
+fn op1dd_ldrsb_pui(instruction: Instruction, cpu: &mut Cpu) {
+    let rn     = instruction.rn();
+    let rd     = instruction.rd();
+    let offset = instruction.mode3_imm_hl();
+
+    let addr = cpu.reg(rn).wrapping_add(offset);
+
+    let val = cpu.load8(addr) as i8;
 
     cpu.set_reg(rd, val as u32)
 }
@@ -632,15 +695,15 @@ fn op22x_eor_i(instruction: Instruction, cpu: &mut Cpu) {
 }
 
 fn op24x_sub_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_imm_no_carry();
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = instruction.mode1_imm_no_carry();
 
     let a = cpu.reg(rn);
 
     let val = a.wrapping_sub(b);
 
-    cpu.set_reg(dst, val);
+    cpu.set_reg(rd, val);
 }
 
 fn op25x_sub_is(instruction: Instruction, cpu: &mut Cpu) {
@@ -653,14 +716,26 @@ fn op25x_sub_is(instruction: Instruction, cpu: &mut Cpu) {
     instruction.subs(cpu, rd, a, b);
 }
 
+fn op26x_rsb_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let a  = instruction.mode1_imm_no_carry();
+
+    let b = cpu.reg(rn);
+
+    let val = a.wrapping_sub(b);
+
+    cpu.set_reg(rd, val);
+}
+
 fn op27x_rsb_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_imm_no_carry();
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let a  = instruction.mode1_imm_no_carry();
 
-    let a = cpu.reg(rn);
+    let b = cpu.reg(rn);
 
-    instruction.subs(cpu, rd, b, a);
+    instruction.subs(cpu, rd, a, b);
 }
 
 fn op28x_add_i(instruction: Instruction, cpu: &mut Cpu) {
@@ -1199,9 +1274,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x180
-    unimplemented, op181_orr_lsl_r, unimplemented, unimplemented,
+    op180_orr_lsl_i, op181_orr_lsl_r, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op180_orr_lsl_i, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x190
@@ -1212,7 +1287,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
 
     // 0x1a0
     op1a0_mov_lsl_i, op1a1_mov_lsl_r, op1a2_mov_lsr_i, op1a3_mov_lsr_r,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op1a4_mov_asr_i, unimplemented, unimplemented, unimplemented,
     op1a0_mov_lsl_i, unimplemented, op1a2_mov_lsr_i, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
@@ -1223,16 +1298,16 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1c0
+    op1c0_bic_lsl_i, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, op1cb_strh_pui,
+    op1c0_bic_lsl_i, unimplemented, unimplemented, op1cb_strh_pui,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1d0
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, op1db_ldrh_pui,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    unimplemented, op1dd_ldrsb_pui, unimplemented, unimplemented,
 
     // 0x1e0
     op1e0_mvn_lsl_i, unimplemented, unimplemented, unimplemented,
@@ -1283,10 +1358,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     op25x_sub_is, op25x_sub_is, op25x_sub_is, op25x_sub_is,
 
     // 0x260
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op26x_rsb_i, op26x_rsb_i, op26x_rsb_i, op26x_rsb_i,
+    op26x_rsb_i, op26x_rsb_i, op26x_rsb_i, op26x_rsb_i,
+    op26x_rsb_i, op26x_rsb_i, op26x_rsb_i, op26x_rsb_i,
+    op26x_rsb_i, op26x_rsb_i, op26x_rsb_i, op26x_rsb_i,
 
     // 0x270
     op27x_rsb_is, op27x_rsb_is, op27x_rsb_is, op27x_rsb_is,

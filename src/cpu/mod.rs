@@ -476,7 +476,7 @@ impl Cpu {
             panic!("Unaligned load32! 0x{:08x} {:?}", addr, self);
         }
 
-        self.inter.load::<Word>(addr)
+        self.inter.load::<Word>(addr & !3)
     }
 
     fn store32(&mut self, addr: u32, val: u32) {

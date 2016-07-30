@@ -165,6 +165,8 @@ impl Interconnect {
                     0x80000c => 0,
                     0x800010 => self.dac.load::<A>(0),
                     0x800014 => self.dac.load::<A>(4),
+                    // XXX BATT CTRL
+                    0x800020 => 0,
                     _ => unimplemented(),
                 },
             _ => unimplemented(),
