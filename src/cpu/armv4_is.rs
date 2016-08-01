@@ -373,6 +373,16 @@ fn op000_and_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(dst, val);
 }
 
+fn op002_and_lsr_i(instruction: Instruction, cpu: &mut Cpu) {
+    let dst = instruction.rd();
+    let rn  = instruction.rn();
+    let and = instruction.mode1_register_rshift_imm_no_carry(cpu);
+
+    let val = cpu.reg(rn) & and;
+
+    cpu.set_reg(dst, val);
+}
+
 fn op009_mul(instruction: Instruction, cpu: &mut Cpu) {
     let rm  = instruction.rm();
     let rs  = instruction.rs();
@@ -386,6 +396,18 @@ fn op009_mul(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.reg(rm).wrapping_mul(cpu.reg(rs));
 
     cpu.set_reg(rn, val);
+}
+
+fn op020_eor_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = instruction.mode1_register_lshift_imm_no_carry(cpu);
+
+    let a = cpu.reg(rn);
+
+    let val = a ^ b;
+
+    cpu.set_reg(rd, val);
 }
 
 fn op040_sub_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
@@ -433,6 +455,23 @@ fn op100_mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     let cpsr = cpu.cpsr();
 
     cpu.set_reg(rd, cpsr);
+}
+
+fn op110_tst_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
+    let rn       = instruction.rn();
+    let rd       = instruction.rd();
+    let (imm, c) = instruction.mode1_register_lshift_imm(cpu);
+
+    if rd != RegisterIndex(0) {
+        // "should be zero"
+        panic!("TST instruction with non-0 Rd");
+    }
+
+    let val = cpu.reg(rn) & imm;
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
 }
 
 fn op120_msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
@@ -1130,9 +1169,9 @@ fn opfxx_swi(_: Instruction, cpu: &mut Cpu) {
 
 static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x000
-    op000_and_lsl_i, unimplemented, unimplemented, unimplemented,
+    op000_and_lsl_i, unimplemented, op002_and_lsr_i, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op000_and_lsl_i, op009_mul, unimplemented, unimplemented,
+    op000_and_lsl_i, op009_mul, op002_and_lsr_i, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x010
@@ -1142,9 +1181,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x020
+    op020_eor_lsl_i, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op020_eor_lsl_i, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x030
@@ -1232,9 +1271,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x110
+    op110_tst_lsl_i, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op110_tst_lsl_i, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x120

@@ -1092,6 +1092,16 @@ fn op34c_bcc(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
+fn op350_bmi(instruction: Instruction, cpu: &mut Cpu) {
+    let offset = instruction.signed_imm8() << 1;
+
+    if cpu.n() {
+        let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
+
+        cpu.set_pc(pc);
+    }
+}
+
 fn op354_bpl(instruction: Instruction, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
@@ -1526,7 +1536,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
     op34c_bcc, op34c_bcc, op34c_bcc, op34c_bcc,
 
     // 0x350
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op350_bmi, op350_bmi, op350_bmi, op350_bmi,
     op354_bpl, op354_bpl, op354_bpl, op354_bpl,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
