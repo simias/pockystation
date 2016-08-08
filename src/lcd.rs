@@ -55,4 +55,9 @@ impl Lcd {
     pub fn framebuffer(&self) -> &[u32; 32] {
         &self.fb
     }
+
+    /// Return true if the screen rotation flag is set
+    pub fn rotated(&self) -> bool {
+        self.mode & 0x80 != 0
+    }
 }

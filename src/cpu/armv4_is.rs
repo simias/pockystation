@@ -1328,7 +1328,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     op1a0_mov_lsl_i, op1a1_mov_lsl_r, op1a2_mov_lsr_i, op1a3_mov_lsr_r,
     op1a4_mov_asr_i, unimplemented, unimplemented, unimplemented,
     op1a0_mov_lsl_i, unimplemented, op1a2_mov_lsr_i, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op1a4_mov_asr_i, unimplemented, unimplemented, unimplemented,
 
     // 0x1b0
     op1b0_mov_lsl_is, unimplemented, op1b2_mov_lsr_is, unimplemented,
