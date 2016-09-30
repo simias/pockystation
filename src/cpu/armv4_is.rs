@@ -44,172 +44,6 @@ impl Instruction {
         RegisterIndex(self.0 & 0xf)
     }
 
-    /// Addressing mode 1: 32bit immediate value
-    fn mode1_imm(self, cpu: &Cpu) -> (u32, bool) {
-        let rot = (self.0 >> 8) & 0xf;
-        let imm = self.0 & 0xff;
-
-        if rot == 0 {
-            (imm, cpu.c())
-        } else {
-            // Rotation factor is multiplied by two
-            let rot = rot << 1;
-
-            let imm = imm.rotate_right(rot);
-
-            let carry_out = (imm as i32) < 0;
-
-            (imm, carry_out)
-        }
-    }
-
-    /// Addressing mode 1: 32bit immediate value. Used when shifter
-    /// carry is not needed.
-    fn mode1_imm_no_carry(self) -> u32 {
-        let rot = (self.0 >> 8) & 0xf;
-        let imm = self.0 & 0xff;
-
-        // Rotation factor is multiplied by two
-        let rot = rot << 1;
-
-        imm.rotate_right(rot)
-    }
-
-    /// Addressing mode 1: Logical shift left by immediate.
-    fn mode1_register_lshift_imm(self, cpu: &Cpu) -> (u32, bool) {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        match shift {
-            0 => (val, cpu.c()),
-            _ => {
-                let carry = ((val << (shift - 1)) & 0x80000000) != 0;
-
-                (val << shift, carry)
-            }
-        }
-    }
-
-    /// Addressing mode 1: Logical shift left by immediate. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_lshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        val << shift
-    }
-
-    /// Addressing mode 1: Logical shift right by immediate.
-    fn mode1_register_rshift_imm(self, cpu: &Cpu) -> (u32, bool) {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        match shift {
-            // Shift 0 means shift by 32
-            0 => (0, (val as i32) < 0),
-            _ => {
-                let carry = (val >> (shift - 1)) & 1 != 0;
-
-                (val >> shift, carry)
-            }
-        }
-    }
-
-    /// Addressing mode 1: Logical shift right by immediate. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_rshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        match shift {
-            // Shift 0 means shift by 32
-            0 => 0,
-            _ => val >> shift
-        }
-    }
-
-    /// Addressing mode 1: Logical shift right by immediate. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_arshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm) as i32;
-
-        let val =
-            match shift {
-                // Shift 0 means shift by 32, which is like shifting
-                // by 31 when using a signed value (i.e. the sign bit
-                // is replicated all over the 32bits)
-                0 => val >> 31,
-                _ => val >> shift
-            };
-
-        val as u32
-    }
-
-    /// Addressing mode 1: Logical shift left by register. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_lshift_reg_no_carry(self, cpu: &Cpu) -> u32 {
-        let rm = self.rm();
-        let rs = self.rs();
-
-        let val = cpu.reg(rm);
-        let shift = cpu.reg(rs);
-
-        match shift {
-            0...31 => val << shift,
-            _ => 0,
-        }
-    }
-
-    /// Addressing mode 1: Logical shift right by register. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_rshift_reg_no_carry(self, cpu: &Cpu) -> u32 {
-        let rm = self.rm();
-        let rs = self.rs();
-
-        let val = cpu.reg(rm);
-        let shift = cpu.reg(rs);
-
-        match shift {
-            0...31 => val >> shift,
-            _ => 0,
-        }
-    }
-
-    /// Addressing mode 2: immediate offset
-    fn mode2_offset_imm(self) -> u32 {
-        self.0 & 0xfff
-    }
-
-    /// Addressing mode 2: Logical shift left by immediate
-    fn mode2_register_lshift(self, cpu: &Cpu) -> u32 {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        val << shift
-    }
-
-    /// Addressing mode 3: Miscellaneous loads and stores - immediate
-    /// offset
-    fn mode3_imm_hl(self) -> u32 {
-        let hi = (self.0 >> 8) & 0xf;
-        let lo = self.0 & 0xf;
-
-        (hi << 4) | lo
-    }
-
     fn branch_imm_offset(self) -> u32 {
         // offset must be sign-extented
         let offset = (self.0 << 8) as i32;
@@ -226,69 +60,6 @@ impl Instruction {
     /// Register list for load/store multiple.
     fn register_list(self) -> u32 {
         self.0 & 0xffff
-    }
-
-    /// Load a 32 bit value from memory and optionally rotate it based
-    /// on bits [1:0]
-    fn ldr(self, cpu: &mut Cpu, addr: u32) -> u32 {
-        let rot = (addr & 3) * 8;
-        let addr = addr & !3;
-
-        let val = cpu.load32(addr);
-
-        val.rotate_right(rot)
-    }
-
-    /// Execute an STM instruction. Returns the address of the last
-    /// store + 4.
-    fn stm(self, cpu: &mut Cpu, start_addr: u32) -> u32 {
-        let rn   = self.rn();
-        let list = self.register_list();
-
-        let mut first = true;
-
-        let mut addr = start_addr;
-
-        for i in 0..15 {
-            if ((list >> i) & 1) != 0 {
-                let reg = RegisterIndex(i);
-
-                // If Rn is specified in the register_list and it's the
-                // first entry then the original value is stored,
-                // otherwise it's "unpredictable".
-                if !first && reg == rn {
-                    panic!("Unpredictable STM! {}", self);
-                }
-
-                let val = cpu.reg(reg);
-                cpu.store32(addr, val);
-
-                addr = addr.wrapping_add(4);
-                first = false;
-            }
-        }
-
-        if ((list >> 15) & 1) != 0 {
-            // Implementation defined
-            panic!("PC stored in STM");
-        }
-
-        addr
-    }
-
-    fn subs(self, cpu: &mut Cpu, rd: RegisterIndex, a: u32, b: u32) {
-        let val = a.wrapping_sub(b);
-
-        let a_neg = (a as i32) < 0;
-        let b_neg = (b as i32) < 0;
-        let v_neg = (val as i32) < 0;
-
-        cpu.set_reg(rd, val);
-
-        cpu.set_n(v_neg);
-        cpu.set_z(val == 0);
-        cpu.set_c(a >= b);
-        cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
     }
 
     /// Execute this instruction
@@ -356,6 +127,224 @@ impl fmt::Display for Instruction {
     }
 }
 
+/// Addressing mode 1: Data-processing operands
+trait Mode1Addressing {
+    /// Return the value of the operand
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32;
+
+    /// Return the value of the operand along with the ALU carry
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool);
+
+    /// Used to validate that the addressing mode matches the
+    /// instruction (useful for debugging).
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool;
+}
+
+struct Mode1Imm;
+
+impl Mode1Addressing for Mode1Imm {
+    fn value(instruction: Instruction, _: &Cpu) -> u32 {
+        let rot = (instruction.0 >> 8) & 0xf;
+        let imm = instruction.0 & 0xff;
+
+        // Rotation factor is multiplied by two
+        imm.rotate_right(rot << 1)
+    }
+
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool) {
+        let rot = (instruction.0 >> 8) & 0xf;
+        let imm = instruction.0 & 0xff;
+
+        if rot == 0 {
+            (imm, cpu.c())
+        } else {
+            // Rotation factor is multiplied by two
+            let imm = imm.rotate_right(rot << 1);
+
+            let carry_out = (imm as i32) < 0;
+
+            (imm, carry_out)
+        }
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 1
+    }
+}
+
+struct Mode1LslImm;
+
+impl Mode1Addressing for Mode1LslImm {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+        let val   = cpu.reg(rm);
+
+        val << shift
+    }
+
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool) {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+        let val   = cpu.reg(rm);
+
+        match shift {
+            0 => (val, cpu.c()),
+            _ => {
+                let carry = ((val << (shift - 1)) & 0x80000000) != 0;
+
+                (val << shift, carry)
+            }
+        }
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 7) == 0
+    }
+}
+
+struct Mode1LsrImm;
+
+impl Mode1Addressing for Mode1LsrImm {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+        let val   = cpu.reg(rm);
+
+        match shift {
+            // Shift 0 means shift by 32
+            0 => 0,
+            _ => val >> shift
+        }
+    }
+
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool) {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+        let val   = cpu.reg(rm);
+
+        match shift {
+            // Shift 0 means shift by 32
+            0 => (0, (val as i32) < 0),
+            _ => {
+                let carry = (val >> (shift - 1)) & 1 != 0;
+
+                (val >> shift, carry)
+            }
+        }
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 7) == 0b010
+    }
+}
+
+struct Mode1AsrImm;
+
+impl Mode1Addressing for Mode1AsrImm {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+        let val   = cpu.reg(rm) as i32;
+
+        let val =
+            match shift {
+                // Shift 0 means shift by 32, which is like shifting
+                // by 31 when using a signed value (i.e. the sign bit
+                // is replicated all over the 32bits)
+                0 => val >> 31,
+                _ => val >> shift
+            };
+
+        val as u32
+    }
+
+    fn value_carry(_instruction: Instruction, _cpu: &Cpu) -> (u32, bool) {
+        unimplemented!();
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 7) == 0b100
+    }
+}
+
+struct Mode1LslReg;
+
+impl Mode1Addressing for Mode1LslReg {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let rm    = instruction.rm();
+        let rs    = instruction.rs();
+        let val   = cpu.reg(rm);
+        let shift = cpu.reg(rs);
+
+        match shift {
+            0...31 => val << shift,
+            _ => 0,
+        }
+    }
+
+    fn value_carry(_instruction: Instruction, _cpu: &Cpu) -> (u32, bool) {
+        unimplemented!();
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 0xf) == 0b0001
+    }
+}
+
+struct Mode1LsrReg;
+
+impl Mode1Addressing for Mode1LsrReg {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let rm    = instruction.rm();
+        let rs    = instruction.rs();
+        let val   = cpu.reg(rm);
+        let shift = cpu.reg(rs);
+
+        match shift {
+            0...31 => val >> shift,
+            _ => 0,
+        }
+    }
+
+    fn value_carry(_instruction: Instruction, _cpu: &Cpu) -> (u32, bool) {
+        unimplemented!();
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 0xf) == 0b0011
+    }
+}
+
 fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
     panic!("Unimplemented instruction {} ({:03x})\n{:?}",
            instruction,
@@ -363,27 +352,272 @@ fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
            cpu);
 }
 
-fn op000_and_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
+fn and<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 0, false));
+
+    let a = cpu.reg(rn);
+
+    let val = a & b;
+
+    cpu.set_reg(rd, val);
+}
+
+fn ands<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd     = instruction.rd();
+    let rn     = instruction.rn();
+    let (b, c) = M::value_carry(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 0, true));
+
+    let a = cpu.reg(rn);
+
+    let val = a & b;
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
+}
+
+fn eor<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 1, false));
+
+    let a = cpu.reg(rn);
+
+    let val = a ^ b;
+
+    cpu.set_reg(rd, val);
+}
+
+fn sub<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
     let dst = instruction.rd();
     let rn  = instruction.rn();
-    let and = instruction.mode1_register_lshift_imm_no_carry(cpu);
+    let b   = M::value(instruction, cpu);
 
-    let val = cpu.reg(rn) & and;
+    debug_assert!(M::is_valid(instruction, 2, false));
+
+    let a = cpu.reg(rn);
+
+    let val = a.wrapping_sub(b);
 
     cpu.set_reg(dst, val);
 }
 
-fn op002_and_lsr_i(instruction: Instruction, cpu: &mut Cpu) {
+fn subs<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd  = instruction.rd();
+    let rn  = instruction.rn();
+    let b   = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 2, true));
+
+    let a = cpu.reg(rn);
+
+    let val = a.wrapping_sub(b);
+
+    let a_neg = (a as i32) < 0;
+    let b_neg = (b as i32) < 0;
+    let v_neg = (val as i32) < 0;
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n(v_neg);
+    cpu.set_z(val == 0);
+    cpu.set_c(a >= b);
+    cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
+}
+
+fn rsb<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let a  = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 3, false));
+
+    let b = cpu.reg(rn);
+
+    let val = a.wrapping_sub(b);
+
+    cpu.set_reg(rd, val);
+}
+
+fn rsbs<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let a  = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 3, true));
+
+    let b = cpu.reg(rn);
+
+    let val = a.wrapping_sub(b);
+
+    let a_neg = (a as i32) < 0;
+    let b_neg = (b as i32) < 0;
+    let v_neg = (val as i32) < 0;
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n(v_neg);
+    cpu.set_z(val == 0);
+    cpu.set_c(a >= b);
+    cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
+}
+
+fn add<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
     let dst = instruction.rd();
     let rn  = instruction.rn();
-    let and = instruction.mode1_register_rshift_imm_no_carry(cpu);
+    let b   = M::value(instruction, cpu);
 
-    let val = cpu.reg(rn) & and;
+    debug_assert!(M::is_valid(instruction, 4, false));
+
+    let a = cpu.reg(rn);
+
+    let val = a.wrapping_add(b);
 
     cpu.set_reg(dst, val);
 }
 
-fn op009_mul(instruction: Instruction, cpu: &mut Cpu) {
+fn tst<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rn       = instruction.rn();
+    let rd       = instruction.rd();
+    let (imm, c) = M::value_carry(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 8, true));
+
+    if rd != RegisterIndex(0) {
+        // "should be zero"
+        panic!("TST instruction with non-0 Rd");
+    }
+
+    let val = cpu.reg(rn) & imm;
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
+}
+
+fn cmp<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rn  = instruction.rn();
+    let rd  = instruction.rd();
+    let b   = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 10, true));
+
+    if rd != RegisterIndex(0) {
+        // "should be zero"
+        panic!("CMP instruction with non-0 Rd");
+    }
+
+    let a = cpu.reg(rn);
+
+    let val = a.wrapping_sub(b);
+
+    let a_neg = (a as i32) < 0;
+    let b_neg = (b as i32) < 0;
+    let v_neg = (val as i32) < 0;
+
+    cpu.set_n(v_neg);
+    cpu.set_z(val == 0);
+    cpu.set_c(a >= b);
+    cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
+}
+
+fn orr<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 12, false));
+
+    let a = cpu.reg(rn);
+
+    let val = a | b;
+
+    cpu.set_reg(rd, val);
+}
+
+fn mov<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd  = instruction.rd();
+    let rn  = instruction.rn();
+    let val = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 13, false));
+
+    if rn != RegisterIndex(0) {
+        // "should be zero"
+        panic!("CMP instruction with non-0 Rn");
+    }
+
+    cpu.set_reg(rd, val);
+}
+
+fn movs<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd       = instruction.rd();
+    let (val, c) = M::value_carry(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 13, true));
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
+}
+
+fn bic<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd  = instruction.rd();
+    let rn  = instruction.rn();
+    let b   = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 14, false));
+
+    let a = cpu.reg(rn);
+
+    let val = a & !b;
+
+    cpu.set_reg(rd, val);
+}
+
+fn mvn<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let dst = instruction.rd();
+    let rn = instruction.rn();
+    let val = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 15, false));
+
+    if rn != RegisterIndex(0) {
+        // "should be zero"
+        panic!("MVN instruction with non-0 Rn");
+    }
+
+    cpu.set_reg(dst, !val);
+}
+
+fn mul(instruction: Instruction, cpu: &mut Cpu) {
     let rm  = instruction.rm();
     let rs  = instruction.rs();
     let rn  = instruction.rn();
@@ -398,54 +632,552 @@ fn op009_mul(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rn, val);
 }
 
-fn op020_eor_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    let a = cpu.reg(rn);
-
-    let val = a ^ b;
-
-    cpu.set_reg(rd, val);
+/// Since we can't use boolean varibales as a generic parameter I use
+/// this trait to create a boolean "metatype"
+trait ModeFlag {
+    #[inline(always)]
+    fn is_set() -> bool;
+    #[inline(always)]
+    fn is_clear() -> bool {
+        !Self::is_set()
+    }
 }
 
-fn op040_sub_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_register_lshift_imm_no_carry(cpu);
+struct Set;
 
-    let a = cpu.reg(rn);
-
-    let val = a.wrapping_sub(b);
-
-    cpu.set_reg(dst, val);
+impl ModeFlag for Set {
+    #[inline(always)]
+    fn is_set() -> bool {
+        true
+    }
 }
 
-fn op050_sub_lsl_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_register_lshift_imm_no_carry(cpu);
+struct Clear;
 
-    let a = cpu.reg(rn);
-
-    instruction.subs(cpu, rd, a, b);
+impl ModeFlag for Clear {
+    #[inline(always)]
+    fn is_set() -> bool {
+        false
+    }
 }
 
+/// Addressing mode 2: Load and Store Word or Unsigned Byte
+trait Mode2Addressing {
+    /// Decode the address and update the registers
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag;
 
-fn op080_add_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    let a = cpu.reg(rn);
-
-    let val = a.wrapping_add(b);
-
-    cpu.set_reg(dst, val);
+    /// Used to validate that the addressing mode matches the
+    /// instruction (useful for debugging).
+    fn is_valid<U>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where U: ModeFlag;
 }
 
-fn op100_mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
+struct Mode2Imm;
+
+impl Mode2Addressing for Mode2Imm {
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag {
+        let rn     = instruction.rn();
+        let offset = instruction.0 & 0xfff;
+
+        let base = cpu.reg(rn);
+
+        if U::is_set() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        }
+    }
+
+    fn is_valid<U>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where U: ModeFlag {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0101 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 22) & 1) == byte as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32
+    }
+}
+
+struct Mode2ImmPost;
+
+impl Mode2Addressing for Mode2ImmPost {
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag {
+        let rd     = instruction.rd();
+        let rn     = instruction.rn();
+        let offset = instruction.0 & 0xfff;
+
+        if rn.is_pc() {
+            // Unpredictable
+            panic!("PC post-indexed");
+        }
+
+        if rd == rn {
+            // Unpredictable
+            panic!("Writeback indexing with RD == RN");
+        }
+
+        let base = cpu.reg(rn);
+
+        let addr =
+            if U::is_set() {
+                base.wrapping_add(offset)
+            } else {
+                base.wrapping_sub(offset)
+            };
+
+        // Post index
+        cpu.set_reg(rn, addr);
+
+        base
+    }
+
+    fn is_valid<U>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where U: ModeFlag {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0100 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 22) & 1) == byte as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32
+    }
+}
+
+struct Mode2LslReg;
+
+impl Mode2Addressing for Mode2LslReg {
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag {
+        let rn    = instruction.rn();
+        let rm    = instruction.rm();
+        let shift = (instruction.0 >> 7) & 0x1f;
+
+        let offset = cpu.reg(rm) << shift;
+
+        let base = cpu.reg(rn);
+
+        if U::is_set() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        }
+    }
+
+    fn is_valid<U>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where U: ModeFlag {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0111 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 22) & 1) == byte as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 4) & 7) == 0
+    }
+}
+
+fn ldr<M, U>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode2Addressing, U: ModeFlag {
+    let rd   = instruction.rd();
+    let addr = M::address::<U>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<U>(instruction, true, false));
+
+    // Bits [1:0] specifies a rightwise rotation by increment of 8
+    // bits
+    let rot = (addr & 3) * 8;
+    let addr = addr & !3;
+
+    let val = cpu.load32(addr).rotate_right(rot);
+
+    cpu.set_reg_pc_mask(rd, val);
+}
+
+fn str<M, U>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode2Addressing, U: ModeFlag {
+    let rd   = instruction.rd();
+    let addr = M::address::<U>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<U>(instruction, false, false));
+
+    if rd.is_pc() {
+        // Implementation defined
+        panic!("PC stored in STR");
+    }
+
+    let val = cpu.reg(rd);
+
+    cpu.store32(addr, val);
+}
+
+fn ldrb<M, U>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode2Addressing, U: ModeFlag {
+    let rd   = instruction.rd();
+    let addr = M::address::<U>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<U>(instruction, true, true));
+
+    let val = cpu.load8(addr);
+
+    cpu.set_reg_pc_mask(rd, val as u32);
+}
+
+fn strb<M, U>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode2Addressing, U: ModeFlag {
+    let rd   = instruction.rd();
+    let addr = M::address::<U>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<U>(instruction, false, true));
+
+    if rd.is_pc() {
+        // I think this is actually allowed and should store
+        // cur_instruction + 8 since A2.4.3 only mentions STR and STM
+        panic!("PC stored in STRB");
+    }
+
+    let val = cpu.reg(rd);
+
+    cpu.store8(addr, val);
+}
+
+/// Addressing mode 3: Miscellaneous Loads and Stores
+trait Mode3Addressing {
+    /// Decode the address and update the registers
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag;
+
+    /// Used to validate that the addressing mode matches the
+    /// instruction (useful for debugging).
+    fn is_valid<U>(instruction: Instruction,
+                   load: bool,
+                   byte: bool,
+                   signed: bool) -> bool
+        where U: ModeFlag;
+}
+
+struct Mode3Imm;
+
+impl Mode3Addressing for Mode3Imm {
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag {
+        let rn = instruction.rn();
+        let hi = (instruction.0 >> 8) & 0xf;
+        let lo = instruction.0 & 0xf;
+
+        let offset = (hi << 4) | lo;
+
+        let base = cpu.reg(rn);
+
+        if U::is_set() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        }
+    }
+
+    fn is_valid<U>(instruction: Instruction,
+                   load: bool,
+                   byte: bool,
+                   signed: bool) -> bool
+        where U: ModeFlag {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0001 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 21) & 3) == 2 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 7) & 1) == 1 &&
+            ((i >> 6) & 1) == signed as u32 &&
+            ((i >> 5) & 1) == (!byte) as u32 &&
+            ((i >> 4) & 1) == 1
+    }
+}
+
+struct Mode3Reg;
+
+impl Mode3Addressing for Mode3Reg {
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag {
+        let rn = instruction.rn();
+        let rm = instruction.rm();
+
+        let base = cpu.reg(rn);
+        let offset = cpu.reg(rm);
+
+        if U::is_set() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        }
+    }
+
+    fn is_valid<U>(instruction: Instruction,
+                   load: bool,
+                   byte: bool,
+                   signed: bool) -> bool
+        where U: ModeFlag {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0001 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 21) & 3) == 0 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 7) & 0x1f) == 1 &&
+            ((i >> 6) & 1) == signed as u32 &&
+            ((i >> 5) & 1) == (!byte) as u32 &&
+            ((i >> 4) & 1) == 1
+    }
+}
+
+fn ldrh<M, U>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode3Addressing, U: ModeFlag {
+    let rd   = instruction.rd();
+    let addr = M::address::<U>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<U>(instruction, true, false, false));
+
+    let val = cpu.load16(addr);
+
+    cpu.set_reg(rd, val as u32)
+}
+
+fn strh<M, U>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode3Addressing, U: ModeFlag {
+    let rd   = instruction.rd();
+    let addr = M::address::<U>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<U>(instruction, false, false, false));
+
+    let val = cpu.reg(rd);
+
+    cpu.store16(addr, val);
+}
+
+fn ldrsb<M, U>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode3Addressing, U: ModeFlag {
+    let rd   = instruction.rd();
+    let addr = M::address::<U>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<U>(instruction, true, true, true));
+
+    let val = cpu.load8(addr) as i8;
+
+    cpu.set_reg(rd, val as u32)
+}
+
+/// LDM/STM start address and WriteBack value
+fn mode4_start_wb<U, P>(base: u32, list: u32) -> (u32, u32)
+    where U: ModeFlag, P: ModeFlag {
+    let list_len = list.count_ones();
+
+    let len_bytes = list_len * 4;
+
+    if U::is_set() {
+        let start_addr =
+            if P::is_set() {
+                base + 4
+            } else {
+                base
+            };
+
+        (start_addr, base.wrapping_add(len_bytes))
+    } else {
+        let start_addr =
+            if P::is_set() {
+                base.wrapping_sub(len_bytes)
+            } else {
+                base.wrapping_sub(len_bytes) + 4
+            };
+
+        (start_addr, base.wrapping_sub(len_bytes))
+    }
+}
+
+fn ldm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
+    where U: ModeFlag, P: ModeFlag, W: ModeFlag {
+    let rn   = instruction.rn();
+    let list = instruction.register_list();
+
+    let base_in_list = (list & (1 << rn.0)) != 0;
+
+    debug_assert!({
+        let i = instruction.0;
+
+        ((i >> 25) & 7) == 0b100 &&
+            ((i >> 24) & 1) == P::is_set() as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 22) & 1) == 0 &&
+            ((i >> 21) & 1) == W::is_set() as u32 &&
+            ((i >> 20) & 1) == 1 as u32
+    });
+
+    if list == 0 || rn.is_pc() ||
+        (W::is_set() && base_in_list) {
+        panic!("Unpredictable LDM");
+    }
+
+    let base = cpu.reg(rn);
+
+    let (mut addr, wb) = mode4_start_wb::<U, P>(base, list);
+
+    for i in 0..16 {
+        if ((list >> i) & 1) != 0 {
+            let reg = RegisterIndex(i);
+
+            let val = cpu.load32(addr);
+
+            cpu.set_reg_pc_mask(reg, val);
+
+            addr = addr.wrapping_add(4);
+        }
+    }
+
+    if W::is_set() {
+        cpu.set_reg(rn, wb);
+    }
+}
+
+// This opcode can have two meanings depending on whether PC is
+// specified in the register list or not.
+//
+// If PC is set then it's LDM(3) it loads the registers normally and
+// then copies the SPSR into the CPSR.
+//
+// If PC is missing then it's LDM(2) and it loads *user mode*
+// registers.
+fn ldms<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
+    where U: ModeFlag, P: ModeFlag, W: ModeFlag {
+    let rn   = instruction.rn();
+    let list = instruction.register_list();
+
+    let base_in_list = (list & (1 << rn.0)) != 0;
+
+    debug_assert!({
+        let i = instruction.0;
+
+        ((i >> 25) & 7) == 0b100 &&
+            ((i >> 24) & 1) == P::is_set() as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 22) & 1) == 1 &&
+            ((i >> 21) & 1) == W::is_set() as u32 &&
+            ((i >> 20) & 1) == 1 as u32
+    });
+
+    if list == 0 || rn.is_pc() ||
+        (W::is_set() && base_in_list) {
+        panic!("Unpredictable LDM");
+    }
+
+    // The presence of PC in the list tells us which instruction this
+    // is
+    let load_spsr = (list & (1 << 15)) != 0;
+
+    if !load_spsr {
+        debug_assert!(W::is_clear());
+    }
+
+    let base = cpu.reg(rn);
+
+    let (mut addr, wb) = mode4_start_wb::<U, P>(base, list);
+
+    let mut pc = 0;
+
+    for i in 0..16 {
+        if ((list >> i) & 1) != 0 {
+            let reg = RegisterIndex(i);
+
+            let val = cpu.load32(addr);
+
+            if load_spsr {
+                if i == 15 {
+                    // Don't load the PC just now, we also need to
+                    // restore the SPSR *but* we want to wait until
+                    // the writeback is handled, otherwise we might
+                    // update a register in the wrong mode.
+                    pc = cpu.load32(addr);
+                } else {
+                    cpu.set_reg(reg, val);
+                }
+            } else {
+                // XXX Implement user-mode loading
+                unimplemented!();
+            }
+
+            addr = addr.wrapping_add(4);
+        }
+    }
+
+    if W::is_set() {
+        cpu.set_reg(rn, wb);
+    }
+
+    if load_spsr {
+        let spsr = cpu.spsr();
+
+        cpu.set_pc_cpsr(pc, spsr);
+    }
+}
+
+fn stm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
+    where U: ModeFlag, P: ModeFlag, W: ModeFlag {
+    let rn   = instruction.rn();
+    let list = instruction.register_list();
+
+    let base_in_list = (list & (1 << rn.0)) != 0;
+
+    debug_assert!({
+        let i = instruction.0;
+
+        ((i >> 25) & 7) == 0b100 &&
+            ((i >> 24) & 1) == P::is_set() as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 22) & 1) == 0 &&
+            ((i >> 21) & 1) == W::is_set() as u32 &&
+            ((i >> 20) & 1) == 0 as u32
+    });
+
+    if list == 0 || rn.is_pc() ||
+        (W::is_set() && base_in_list) {
+        panic!("Unpredictable LDM");
+    }
+
+    let pc_in_list = (list & (1 << 15)) != 0;
+
+    if pc_in_list {
+        panic!("Implementation-defined STM");
+    }
+
+    let base = cpu.reg(rn);
+
+    let (mut addr, wb) = mode4_start_wb::<U, P>(base, list);
+
+    let mut first = true;
+
+    for i in 0..16 {
+        if ((list >> i) & 1) != 0 {
+            let reg = RegisterIndex(i);
+
+            if W::is_set() && reg == rn && !first {
+                panic!("Unpredictable STM");
+            }
+
+            let val = cpu.reg(reg);
+            cpu.store32(addr, val);
+
+            addr = addr.wrapping_add(4);
+
+            first = false;
+        }
+    }
+
+    if W::is_set() {
+        cpu.set_reg(rn, wb);
+    }
+}
+
+fn mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.rd();
 
     if (instruction.0 & 0xf0fff) != 0xf0000 {
@@ -457,24 +1189,7 @@ fn op100_mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, cpsr);
 }
 
-fn op110_tst_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rn       = instruction.rn();
-    let rd       = instruction.rd();
-    let (imm, c) = instruction.mode1_register_lshift_imm(cpu);
-
-    if rd != RegisterIndex(0) {
-        // "should be zero"
-        panic!("TST instruction with non-0 Rd");
-    }
-
-    let val = cpu.reg(rn) & imm;
-
-    cpu.set_n((val as i32) < 0);
-    cpu.set_z(val == 0);
-    cpu.set_c(c);
-}
-
-fn op120_msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
+fn msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     let rm   = instruction.rm();
     let mask = instruction.msr_field_mask();
 
@@ -487,7 +1202,7 @@ fn op120_msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.msr_cpsr(val, mask);
 }
 
-fn op121_bx(instruction: Instruction, cpu: &mut Cpu) {
+fn bx(instruction: Instruction, cpu: &mut Cpu) {
     let rm = instruction.rm();
 
     if (instruction.0 & 0xfff00) != 0xfff00 {
@@ -504,7 +1219,7 @@ fn op121_bx(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc_thumb(address, thumb);
 }
 
-fn op140_mrs_spsr(instruction: Instruction, cpu: &mut Cpu) {
+fn mrs_spsr(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.rd();
 
     if rd.is_pc() || (instruction.0 & 0xf0fff) != 0xf0000 {
@@ -516,634 +1231,7 @@ fn op140_mrs_spsr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op150_cmp_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rn  = instruction.rn();
-    let rd  = instruction.rd();
-    let b   = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    if rd != RegisterIndex(0) {
-        // "should be zero"
-        panic!("CMP instruction with non-0 Rd");
-    }
-
-    let a = cpu.reg(rn);
-
-    let val = a.wrapping_sub(b);
-
-    let a_neg = (a as i32) < 0;
-    let b_neg = (b as i32) < 0;
-    let v_neg = (val as i32) < 0;
-
-    cpu.set_n(v_neg);
-    cpu.set_z(val == 0);
-    cpu.set_c(a >= b);
-    cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
-}
-
-fn op180_orr_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    let a = cpu.reg(rn);
-
-    let val = a | b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op181_orr_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_register_lshift_reg_no_carry(cpu);
-
-    let a = cpu.reg(rn);
-
-    let val = a | b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op19b_ldrh_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let rm = instruction.rm();
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-
-    let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
-
-    let val = cpu.load16(addr);
-
-    cpu.set_reg(rd, val as u32);
-}
-
-fn op1a0_mov_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op1a1_mov_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let val = instruction.mode1_register_lshift_reg_no_carry(cpu);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op1a2_mov_lsr_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let val = instruction.mode1_register_rshift_imm_no_carry(cpu);
-
-    cpu.set_reg(dst, val);
-}
-
-fn op1a3_mov_lsr_r(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let val = instruction.mode1_register_rshift_reg_no_carry(cpu);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op1a4_mov_asr_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let val = instruction.mode1_register_arshift_imm_no_carry(cpu);
-
-    cpu.set_reg(dst, val);
-}
-
-fn op1b0_mov_lsl_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let (val, carry) = instruction.mode1_register_lshift_imm(cpu);
-
-    cpu.set_reg(rd, val);
-
-    cpu.set_n((val as i32) < 0);
-    cpu.set_z(val == 0);
-    cpu.set_c(carry);
-}
-
-fn op1b2_mov_lsr_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let (val, carry) = instruction.mode1_register_rshift_imm(cpu);
-
-    cpu.set_reg(rd, val);
-
-    cpu.set_n((val as i32) < 0);
-    cpu.set_z(val == 0);
-    cpu.set_c(carry);
-}
-
-fn op1c0_bic_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    let a = cpu.reg(rn);
-
-    let val = a & !b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op1cb_strh_pui(instruction: Instruction, cpu: &mut Cpu) {
-    let rn     = instruction.rn();
-    let rd     = instruction.rd();
-    let offset = instruction.mode3_imm_hl();
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    let val = cpu.reg(rd);
-
-    cpu.store16(addr, val);
-}
-
-fn op1db_ldrh_pui(instruction: Instruction, cpu: &mut Cpu) {
-    let rn     = instruction.rn();
-    let rd     = instruction.rd();
-    let offset = instruction.mode3_imm_hl();
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    let val = cpu.load16(addr);
-
-    cpu.set_reg(rd, val as u32)
-}
-
-fn op1dd_ldrsb_pui(instruction: Instruction, cpu: &mut Cpu) {
-    let rn     = instruction.rn();
-    let rd     = instruction.rd();
-    let offset = instruction.mode3_imm_hl();
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    let val = cpu.load8(addr) as i8;
-
-    cpu.set_reg(rd, val as u32)
-}
-
-fn op1e0_mvn_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    cpu.set_reg(rd, !val);
-}
-
-fn op20x_and_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a & b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op21x_and_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd         = instruction.rd();
-    let rn         = instruction.rn();
-    let (b, carry) = instruction.mode1_imm(cpu);
-
-    if rd.is_pc() {
-        // Should put CPSR in SPSR for some reason
-        panic!("Unimplemented AND {}", instruction);
-    }
-
-    let a = cpu.reg(rn);
-
-    let val = a & b;
-
-    cpu.set_reg(rd, val);
-
-    cpu.set_n((val as i32) < 0);
-    cpu.set_z(val == 0);
-    cpu.set_c(carry);
-}
-
-fn op22x_eor_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a ^ b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op24x_sub_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a.wrapping_sub(b);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op25x_sub_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    instruction.subs(cpu, rd, a, b);
-}
-
-fn op26x_rsb_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let a  = instruction.mode1_imm_no_carry();
-
-    let b = cpu.reg(rn);
-
-    let val = a.wrapping_sub(b);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op27x_rsb_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let a  = instruction.mode1_imm_no_carry();
-
-    let b = cpu.reg(rn);
-
-    instruction.subs(cpu, rd, a, b);
-}
-
-fn op28x_add_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a.wrapping_add(b);
-
-    cpu.set_reg(dst, val);
-}
-
-fn op31x_tst_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rn       = instruction.rn();
-    let rd       = instruction.rd();
-    let (imm, c) = instruction.mode1_imm(cpu);
-
-    if rd != RegisterIndex(0) {
-        // "should be zero"
-        panic!("TST instruction with non-0 Rd");
-    }
-
-    let val = cpu.reg(rn) & imm;
-
-    cpu.set_n((val as i32) < 0);
-    cpu.set_z(val == 0);
-    cpu.set_c(c);
-}
-
-fn op35x_cmp_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rn  = instruction.rn();
-    let rd  = instruction.rd();
-    let b   = instruction.mode1_imm_no_carry();
-
-    if rd != RegisterIndex(0) {
-        // "should be zero"
-        panic!("CMP instruction with non-0 Rd");
-    }
-
-    let a = cpu.reg(rn);
-
-    let val = a.wrapping_sub(b);
-
-    let a_neg = (a as i32) < 0;
-    let b_neg = (b as i32) < 0;
-    let v_neg = (val as i32) < 0;
-
-    cpu.set_n(v_neg);
-    cpu.set_z(val == 0);
-    cpu.set_c(a >= b);
-    cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
-}
-
-fn op38x_orr_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a | b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op3ax_mov_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let rn  = instruction.rn();
-    let val = instruction.mode1_imm_no_carry();
-
-    if rn != RegisterIndex(0) {
-        // "should be zero"
-        panic!("MOV instruction with non-0 Rn");
-    }
-
-    cpu.set_reg(rd, val);
-}
-
-fn op3cx_bic_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a & !b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op3ex_mvn_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn = instruction.rn();
-    let val = instruction.mode1_imm_no_carry();
-
-    if rn != RegisterIndex(0) {
-        // "should be zero"
-        panic!("MVN instruction with non-0 Rn");
-    }
-
-    cpu.set_reg(dst, !val);
-}
-
-fn op48x_str_u(instruction: Instruction, cpu: &mut Cpu) {
-    let src    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    if src.is_pc() {
-        // Implementation defined
-        panic!("PC stored in STR");
-    }
-
-    if base.is_pc() {
-        // Unpredictable
-        panic!("PC post-indexed");
-    }
-
-    let addr = cpu.reg(base);
-
-    let val = cpu.reg(src);
-
-    cpu.store32(addr, val);
-
-    let post_addr = addr.wrapping_add(offset);
-
-    cpu.set_reg(base, post_addr)
-}
-
-fn op58x_str_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let src    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    if src.is_pc() {
-        // Implementation defined
-        panic!("PC stored in STR");
-    }
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = cpu.reg(src);
-
-    cpu.store32(addr, val);
-}
-
-fn op49x_ldr_u(instruction: Instruction, cpu: &mut Cpu) {
-    let rd     = instruction.rd();
-    let rn     = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    if rn.is_pc() {
-        panic!("unpredictable LDR");
-    }
-
-    let addr = cpu.reg(rn);
-
-    let post_addr = addr.wrapping_add(offset);
-
-    let val = instruction.ldr(cpu, addr);
-
-    cpu.set_reg(rn, post_addr);
-    cpu.set_reg_pc_mask(rd, val);
-}
-
-fn op59x_ldr_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let dst    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = instruction.ldr(cpu, addr);
-
-    cpu.set_reg_pc_mask(dst, val);
-}
-
-fn op5cx_strb_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let src    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    if src.is_pc() {
-        // Unpredictable (not "implementation defined" like STR
-        // for some reason)
-        panic!("PC stored in STRB");
-    }
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = cpu.reg(src);
-
-    cpu.store8(addr, val);
-}
-
-fn op5dx_ldrb_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let dst    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = cpu.load8(addr);
-
-    cpu.set_reg_pc_mask(dst, val as u32);
-}
-
-fn op780_str_ipu(instruction: Instruction, cpu: &mut Cpu) {
-    let src    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_register_lshift(cpu);
-
-    if src.is_pc() {
-        // Implementation defined
-        panic!("PC stored in STR");
-    }
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = cpu.reg(src);
-
-    cpu.store32(addr, val);
-}
-
-fn op790_ldr_ipu(instruction: Instruction, cpu: &mut Cpu) {
-    let dst    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_register_lshift(cpu);
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = instruction.ldr(cpu, addr);
-
-    cpu.set_reg_pc_mask(dst, val);
-}
-
-fn op88x_stm_u(instruction: Instruction, cpu: &mut Cpu) {
-    let rn = instruction.rn();
-
-    if rn.is_pc() {
-        panic!("PC-relative STM!");
-    }
-
-    let start_addr = cpu.reg(rn);
-
-    instruction.stm(cpu, start_addr);
-}
-
-fn op89x_ldm_u(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc()  {
-        panic!("Unpredictable LDM");
-    }
-
-    let mut addr = cpu.reg(rn);
-
-    for i in 0..16 {
-        if ((list >> i) & 1) != 0 {
-            let reg = RegisterIndex(i);
-
-            let val = cpu.load32(addr);
-
-            cpu.set_reg_pc_mask(reg, val);
-
-            addr = addr.wrapping_add(4);
-        }
-    }
-}
-
-fn op8ax_stm_uw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn = instruction.rn();
-
-    if rn.is_pc() {
-        panic!("PC-relative STM!");
-    }
-
-    let start_addr = cpu.reg(rn);
-
-    let end_addr = instruction.stm(cpu, start_addr);
-
-    cpu.set_reg(rn, end_addr);
-}
-
-fn op8bx_ldm_uw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc() || (list & (1 << rn.0)) != 0 {
-        // Can't load to the base register if we want writeback
-        panic!("Unpredictable LDM");
-    }
-
-    let mut addr = cpu.reg(rn);
-
-    for i in 0..16 {
-        if ((list >> i) & 1) != 0 {
-            let reg = RegisterIndex(i);
-
-            let val = cpu.load32(addr);
-
-            cpu.set_reg_pc_mask(reg, val);
-
-            addr = addr.wrapping_add(4);
-        }
-    }
-
-    cpu.set_reg(rn, addr);
-}
-
-fn op8fx_ldm_spsr_uw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc() || (list & (1 << rn.0)) != 0 {
-        // Can't load to the base register if we want writeback
-        panic!("Unpredictable LDM");
-    }
-
-    if (list & (1 << 15)) == 0 {
-        panic!("LDM SPSR without PC!");
-    }
-
-    let mut addr = cpu.reg(rn);
-
-    for i in 0..15 {
-        if ((list >> i) & 1) != 0 {
-            let reg = RegisterIndex(i);
-
-            let val = cpu.load32(addr);
-
-            cpu.set_reg(reg, val);
-
-            addr = addr.wrapping_add(4);
-        }
-    }
-
-    let pc = cpu.load32(addr);
-    addr = addr.wrapping_add(4);
-
-    cpu.set_reg(rn, addr);
-
-    let spsr = cpu.spsr();
-
-    cpu.set_pc_cpsr(pc, spsr);
-}
-
-fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc() {
-        // Using PC as base if we want writeback is unpredictable
-        panic!("PC-relative STM!");
-    }
-
-    let num_regs = list.count_ones();
-
-    let start_addr = cpu.reg(rn).wrapping_sub(4 * num_regs);
-
-    instruction.stm(cpu, start_addr);
-
-    cpu.set_reg(rn, start_addr);
-}
-
-fn opaxx_b(instruction: Instruction, cpu: &mut Cpu) {
+fn b(instruction: Instruction, cpu: &mut Cpu) {
     let offset = instruction.branch_imm_offset();
 
     let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
@@ -1151,7 +1239,7 @@ fn opaxx_b(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc(pc);
 }
 
-fn opbxx_bl(instruction: Instruction, cpu: &mut Cpu) {
+fn bl(instruction: Instruction, cpu: &mut Cpu) {
     let offset = instruction.branch_imm_offset();
 
     let pc = cpu.registers[15].wrapping_add(offset);
@@ -1163,15 +1251,15 @@ fn opbxx_bl(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc(pc);
 }
 
-fn opfxx_swi(_: Instruction, cpu: &mut Cpu) {
+fn swi(_: Instruction, cpu: &mut Cpu) {
     cpu.swi();
 }
 
 static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x000
-    op000_and_lsl_i, unimplemented, op002_and_lsr_i, unimplemented,
+    and::<Mode1LslImm>, unimplemented, and::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op000_and_lsl_i, op009_mul, op002_and_lsr_i, unimplemented,
+    and::<Mode1LslImm>, mul, and::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x010
@@ -1181,9 +1269,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x020
-    op020_eor_lsl_i, unimplemented, unimplemented, unimplemented,
+    eor::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op020_eor_lsl_i, unimplemented, unimplemented, unimplemented,
+    eor::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x030
@@ -1193,15 +1281,15 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x040
-    op040_sub_lsl_i, unimplemented, unimplemented, unimplemented,
+    sub::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op040_sub_lsl_i, unimplemented, unimplemented, unimplemented,
+    sub::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x050
-    op050_sub_lsl_is, unimplemented, unimplemented, unimplemented,
+    subs::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op050_sub_lsl_is, unimplemented, unimplemented, unimplemented,
+    subs::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x060
@@ -1217,9 +1305,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x080
-    op080_add_lsl_i, unimplemented, unimplemented, unimplemented,
+    add::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op080_add_lsl_i, unimplemented, unimplemented, unimplemented,
+    add::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x090
@@ -1265,19 +1353,19 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x100
-    op100_mrs_cpsr, unimplemented, unimplemented, unimplemented,
+    mrs_cpsr, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x110
-    op110_tst_lsl_i, unimplemented, unimplemented, unimplemented,
+    tst::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op110_tst_lsl_i, unimplemented, unimplemented, unimplemented,
+    tst::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x120
-    op120_msr_cpsr, op121_bx, unimplemented, unimplemented,
+    msr_cpsr, bx, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1289,15 +1377,15 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x140
-    op140_mrs_spsr, unimplemented, unimplemented, unimplemented,
+    mrs_spsr, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x150
-    op150_cmp_lsl_i, unimplemented, unimplemented, unimplemented,
+    cmp::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op150_cmp_lsl_i, unimplemented, unimplemented, unimplemented,
+    cmp::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x160
@@ -1313,45 +1401,47 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x180
-    op180_orr_lsl_i, op181_orr_lsl_r, unimplemented, unimplemented,
+    orr::<Mode1LslImm>, orr::<Mode1LslReg>, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op180_orr_lsl_i, unimplemented, unimplemented, unimplemented,
+    orr::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x190
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, op19b_ldrh_pu,
+    unimplemented, unimplemented, unimplemented, ldrh::<Mode3Reg, Set>,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1a0
-    op1a0_mov_lsl_i, op1a1_mov_lsl_r, op1a2_mov_lsr_i, op1a3_mov_lsr_r,
-    op1a4_mov_asr_i, unimplemented, unimplemented, unimplemented,
-    op1a0_mov_lsl_i, unimplemented, op1a2_mov_lsr_i, unimplemented,
-    op1a4_mov_asr_i, unimplemented, unimplemented, unimplemented,
+    mov::<Mode1LslImm>, mov::<Mode1LslReg>,
+    mov::<Mode1LsrImm>, mov::<Mode1LsrReg>,
+    mov::<Mode1AsrImm>, unimplemented, unimplemented, unimplemented,
+    mov::<Mode1LslImm>, unimplemented, mov::<Mode1LsrImm>, unimplemented,
+    mov::<Mode1AsrImm>, unimplemented, unimplemented, unimplemented,
 
     // 0x1b0
-    op1b0_mov_lsl_is, unimplemented, op1b2_mov_lsr_is, unimplemented,
+    movs::<Mode1LslImm>, movs::<Mode1LslReg>,
+    movs::<Mode1LsrImm>, movs::<Mode1LsrReg>,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op1b0_mov_lsl_is, unimplemented, op1b2_mov_lsr_is, unimplemented,
+    movs::<Mode1LslImm>, unimplemented, movs::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1c0
-    op1c0_bic_lsl_i, unimplemented, unimplemented, unimplemented,
+    bic::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op1c0_bic_lsl_i, unimplemented, unimplemented, op1cb_strh_pui,
+    bic::<Mode1LslImm>, unimplemented, unimplemented, strh::<Mode3Imm, Set>,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1d0
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, op1db_ldrh_pui,
-    unimplemented, op1dd_ldrsb_pui, unimplemented, unimplemented,
+    unimplemented, unimplemented, unimplemented, ldrh::<Mode3Imm, Set>,
+    unimplemented, ldrsb::<Mode3Imm, Set>, unimplemented, unimplemented,
 
     // 0x1e0
-    op1e0_mvn_lsl_i, unimplemented, unimplemented, unimplemented,
+    mvn::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op1e0_mvn_lsl_i, unimplemented, unimplemented, unimplemented,
+    mvn::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1f0
@@ -1361,22 +1451,22 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x200
-    op20x_and_i, op20x_and_i, op20x_and_i, op20x_and_i,
-    op20x_and_i, op20x_and_i, op20x_and_i, op20x_and_i,
-    op20x_and_i, op20x_and_i, op20x_and_i, op20x_and_i,
-    op20x_and_i, op20x_and_i, op20x_and_i, op20x_and_i,
+    and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>,
+    and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>,
+    and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>,
+    and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>,
 
     // 0x210
-    op21x_and_is, op21x_and_is, op21x_and_is, op21x_and_is,
-    op21x_and_is, op21x_and_is, op21x_and_is, op21x_and_is,
-    op21x_and_is, op21x_and_is, op21x_and_is, op21x_and_is,
-    op21x_and_is, op21x_and_is, op21x_and_is, op21x_and_is,
+    ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>,
+    ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>,
+    ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>,
+    ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>,
 
     // 0x220
-    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
-    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
-    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
-    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
+    eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>,
+    eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>,
+    eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>,
+    eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>,
 
     // 0x230
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1385,34 +1475,34 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x240
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
+    sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>,
+    sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>,
+    sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>,
+    sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>,
 
     // 0x250
-    op25x_sub_is, op25x_sub_is, op25x_sub_is, op25x_sub_is,
-    op25x_sub_is, op25x_sub_is, op25x_sub_is, op25x_sub_is,
-    op25x_sub_is, op25x_sub_is, op25x_sub_is, op25x_sub_is,
-    op25x_sub_is, op25x_sub_is, op25x_sub_is, op25x_sub_is,
+    subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>,
+    subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>,
+    subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>,
+    subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>,
 
     // 0x260
-    op26x_rsb_i, op26x_rsb_i, op26x_rsb_i, op26x_rsb_i,
-    op26x_rsb_i, op26x_rsb_i, op26x_rsb_i, op26x_rsb_i,
-    op26x_rsb_i, op26x_rsb_i, op26x_rsb_i, op26x_rsb_i,
-    op26x_rsb_i, op26x_rsb_i, op26x_rsb_i, op26x_rsb_i,
+    rsb::<Mode1Imm>, rsb::<Mode1Imm>, rsb::<Mode1Imm>, rsb::<Mode1Imm>,
+    rsb::<Mode1Imm>, rsb::<Mode1Imm>, rsb::<Mode1Imm>, rsb::<Mode1Imm>,
+    rsb::<Mode1Imm>, rsb::<Mode1Imm>, rsb::<Mode1Imm>, rsb::<Mode1Imm>,
+    rsb::<Mode1Imm>, rsb::<Mode1Imm>, rsb::<Mode1Imm>, rsb::<Mode1Imm>,
 
     // 0x270
-    op27x_rsb_is, op27x_rsb_is, op27x_rsb_is, op27x_rsb_is,
-    op27x_rsb_is, op27x_rsb_is, op27x_rsb_is, op27x_rsb_is,
-    op27x_rsb_is, op27x_rsb_is, op27x_rsb_is, op27x_rsb_is,
-    op27x_rsb_is, op27x_rsb_is, op27x_rsb_is, op27x_rsb_is,
+    rsbs::<Mode1Imm>, rsbs::<Mode1Imm>, rsbs::<Mode1Imm>, rsbs::<Mode1Imm>,
+    rsbs::<Mode1Imm>, rsbs::<Mode1Imm>, rsbs::<Mode1Imm>, rsbs::<Mode1Imm>,
+    rsbs::<Mode1Imm>, rsbs::<Mode1Imm>, rsbs::<Mode1Imm>, rsbs::<Mode1Imm>,
+    rsbs::<Mode1Imm>, rsbs::<Mode1Imm>, rsbs::<Mode1Imm>, rsbs::<Mode1Imm>,
 
     // 0x280
-    op28x_add_i, op28x_add_i, op28x_add_i, op28x_add_i,
-    op28x_add_i, op28x_add_i, op28x_add_i, op28x_add_i,
-    op28x_add_i, op28x_add_i, op28x_add_i, op28x_add_i,
-    op28x_add_i, op28x_add_i, op28x_add_i, op28x_add_i,
+    add::<Mode1Imm>, add::<Mode1Imm>, add::<Mode1Imm>, add::<Mode1Imm>,
+    add::<Mode1Imm>, add::<Mode1Imm>, add::<Mode1Imm>, add::<Mode1Imm>,
+    add::<Mode1Imm>, add::<Mode1Imm>, add::<Mode1Imm>, add::<Mode1Imm>,
+    add::<Mode1Imm>, add::<Mode1Imm>, add::<Mode1Imm>, add::<Mode1Imm>,
 
     // 0x290
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1463,10 +1553,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x310
-    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
-    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
-    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
-    op31x_tst_i, op31x_tst_i, op31x_tst_i, op31x_tst_i,
+    tst::<Mode1Imm>, tst::<Mode1Imm>, tst::<Mode1Imm>, tst::<Mode1Imm>,
+    tst::<Mode1Imm>, tst::<Mode1Imm>, tst::<Mode1Imm>, tst::<Mode1Imm>,
+    tst::<Mode1Imm>, tst::<Mode1Imm>, tst::<Mode1Imm>, tst::<Mode1Imm>,
+    tst::<Mode1Imm>, tst::<Mode1Imm>, tst::<Mode1Imm>, tst::<Mode1Imm>,
 
     // 0x320
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1487,10 +1577,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x350
-    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
-    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
-    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
-    op35x_cmp_i, op35x_cmp_i, op35x_cmp_i, op35x_cmp_i,
+    cmp::<Mode1Imm>, cmp::<Mode1Imm>, cmp::<Mode1Imm>, cmp::<Mode1Imm>,
+    cmp::<Mode1Imm>, cmp::<Mode1Imm>, cmp::<Mode1Imm>, cmp::<Mode1Imm>,
+    cmp::<Mode1Imm>, cmp::<Mode1Imm>, cmp::<Mode1Imm>, cmp::<Mode1Imm>,
+    cmp::<Mode1Imm>, cmp::<Mode1Imm>, cmp::<Mode1Imm>, cmp::<Mode1Imm>,
 
     // 0x360
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1505,10 +1595,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x380
-    op38x_orr_i, op38x_orr_i, op38x_orr_i, op38x_orr_i,
-    op38x_orr_i, op38x_orr_i, op38x_orr_i, op38x_orr_i,
-    op38x_orr_i, op38x_orr_i, op38x_orr_i, op38x_orr_i,
-    op38x_orr_i, op38x_orr_i, op38x_orr_i, op38x_orr_i,
+    orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>,
+    orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>,
+    orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>,
+    orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>,
 
     // 0x390
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1517,10 +1607,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x3a0
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
+    mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>,
+    mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>,
+    mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>,
+    mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>,
 
     // 0x3b0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1529,10 +1619,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x3c0
-    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
-    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
-    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
-    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
+    bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>,
+    bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>,
+    bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>,
+    bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>,
 
     // 0x3d0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1541,10 +1631,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x3e0
-    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
-    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
-    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
-    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
+    mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>,
+    mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>,
+    mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>,
+    mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>,
 
     // 0x3f0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1601,16 +1691,24 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x480
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
+    str::<Mode2ImmPost, Set>, str::<Mode2ImmPost, Set>,
+    str::<Mode2ImmPost, Set>, str::<Mode2ImmPost, Set>,
+    str::<Mode2ImmPost, Set>, str::<Mode2ImmPost, Set>,
+    str::<Mode2ImmPost, Set>, str::<Mode2ImmPost, Set>,
+    str::<Mode2ImmPost, Set>, str::<Mode2ImmPost, Set>,
+    str::<Mode2ImmPost, Set>, str::<Mode2ImmPost, Set>,
+    str::<Mode2ImmPost, Set>, str::<Mode2ImmPost, Set>,
+    str::<Mode2ImmPost, Set>, str::<Mode2ImmPost, Set>,
 
     // 0x490
-    op49x_ldr_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
+    ldr::<Mode2ImmPost, Set>, ldr::<Mode2ImmPost, Set>,
+    ldr::<Mode2ImmPost, Set>, ldr::<Mode2ImmPost, Set>,
+    ldr::<Mode2ImmPost, Set>, ldr::<Mode2ImmPost, Set>,
+    ldr::<Mode2ImmPost, Set>, ldr::<Mode2ImmPost, Set>,
+    ldr::<Mode2ImmPost, Set>, ldr::<Mode2ImmPost, Set>,
+    ldr::<Mode2ImmPost, Set>, ldr::<Mode2ImmPost, Set>,
+    ldr::<Mode2ImmPost, Set>, ldr::<Mode2ImmPost, Set>,
+    ldr::<Mode2ImmPost, Set>, ldr::<Mode2ImmPost, Set>,
 
     // 0x4a0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1649,16 +1747,24 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x500
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    str::<Mode2Imm, Clear>, str::<Mode2Imm, Clear>,
+    str::<Mode2Imm, Clear>, str::<Mode2Imm, Clear>,
+    str::<Mode2Imm, Clear>, str::<Mode2Imm, Clear>,
+    str::<Mode2Imm, Clear>, str::<Mode2Imm, Clear>,
+    str::<Mode2Imm, Clear>, str::<Mode2Imm, Clear>,
+    str::<Mode2Imm, Clear>, str::<Mode2Imm, Clear>,
+    str::<Mode2Imm, Clear>, str::<Mode2Imm, Clear>,
+    str::<Mode2Imm, Clear>, str::<Mode2Imm, Clear>,
 
     // 0x510
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldr::<Mode2Imm, Clear>, ldr::<Mode2Imm, Clear>,
+    ldr::<Mode2Imm, Clear>, ldr::<Mode2Imm, Clear>,
+    ldr::<Mode2Imm, Clear>, ldr::<Mode2Imm, Clear>,
+    ldr::<Mode2Imm, Clear>, ldr::<Mode2Imm, Clear>,
+    ldr::<Mode2Imm, Clear>, ldr::<Mode2Imm, Clear>,
+    ldr::<Mode2Imm, Clear>, ldr::<Mode2Imm, Clear>,
+    ldr::<Mode2Imm, Clear>, ldr::<Mode2Imm, Clear>,
+    ldr::<Mode2Imm, Clear>, ldr::<Mode2Imm, Clear>,
 
     // 0x520
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1697,16 +1803,24 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x580
-    op58x_str_pu, op58x_str_pu, op58x_str_pu, op58x_str_pu,
-    op58x_str_pu, op58x_str_pu, op58x_str_pu, op58x_str_pu,
-    op58x_str_pu, op58x_str_pu, op58x_str_pu, op58x_str_pu,
-    op58x_str_pu, op58x_str_pu, op58x_str_pu, op58x_str_pu,
+    str::<Mode2Imm, Set>, str::<Mode2Imm, Set>,
+    str::<Mode2Imm, Set>, str::<Mode2Imm, Set>,
+    str::<Mode2Imm, Set>, str::<Mode2Imm, Set>,
+    str::<Mode2Imm, Set>, str::<Mode2Imm, Set>,
+    str::<Mode2Imm, Set>, str::<Mode2Imm, Set>,
+    str::<Mode2Imm, Set>, str::<Mode2Imm, Set>,
+    str::<Mode2Imm, Set>, str::<Mode2Imm, Set>,
+    str::<Mode2Imm, Set>, str::<Mode2Imm, Set>,
 
     // 0x590
-    op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu,
-    op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu,
-    op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu,
-    op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu, op59x_ldr_pu,
+    ldr::<Mode2Imm, Set>, ldr::<Mode2Imm, Set>,
+    ldr::<Mode2Imm, Set>, ldr::<Mode2Imm, Set>,
+    ldr::<Mode2Imm, Set>, ldr::<Mode2Imm, Set>,
+    ldr::<Mode2Imm, Set>, ldr::<Mode2Imm, Set>,
+    ldr::<Mode2Imm, Set>, ldr::<Mode2Imm, Set>,
+    ldr::<Mode2Imm, Set>, ldr::<Mode2Imm, Set>,
+    ldr::<Mode2Imm, Set>, ldr::<Mode2Imm, Set>,
+    ldr::<Mode2Imm, Set>, ldr::<Mode2Imm, Set>,
 
     // 0x5a0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1721,16 +1835,24 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x5c0
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
+    strb::<Mode2Imm, Set>, strb::<Mode2Imm, Set>,
+    strb::<Mode2Imm, Set>, strb::<Mode2Imm, Set>,
+    strb::<Mode2Imm, Set>, strb::<Mode2Imm, Set>,
+    strb::<Mode2Imm, Set>, strb::<Mode2Imm, Set>,
+    strb::<Mode2Imm, Set>, strb::<Mode2Imm, Set>,
+    strb::<Mode2Imm, Set>, strb::<Mode2Imm, Set>,
+    strb::<Mode2Imm, Set>, strb::<Mode2Imm, Set>,
+    strb::<Mode2Imm, Set>, strb::<Mode2Imm, Set>,
 
     // 0x5d0
-    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
-    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
-    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
-    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
+    ldrb::<Mode2Imm, Set>, ldrb::<Mode2Imm, Set>,
+    ldrb::<Mode2Imm, Set>, ldrb::<Mode2Imm, Set>,
+    ldrb::<Mode2Imm, Set>, ldrb::<Mode2Imm, Set>,
+    ldrb::<Mode2Imm, Set>, ldrb::<Mode2Imm, Set>,
+    ldrb::<Mode2Imm, Set>, ldrb::<Mode2Imm, Set>,
+    ldrb::<Mode2Imm, Set>, ldrb::<Mode2Imm, Set>,
+    ldrb::<Mode2Imm, Set>, ldrb::<Mode2Imm, Set>,
+    ldrb::<Mode2Imm, Set>, ldrb::<Mode2Imm, Set>,
 
     // 0x5e0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1889,15 +2011,15 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x780
-    op780_str_ipu, unimplemented, unimplemented, unimplemented,
+    str::<Mode2LslReg, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op780_str_ipu, unimplemented, unimplemented, unimplemented,
+    str::<Mode2LslReg, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x790
-    op790_ldr_ipu, unimplemented, unimplemented, unimplemented,
+    ldr::<Mode2LslReg, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op790_ldr_ipu, unimplemented, unimplemented, unimplemented,
+    ldr::<Mode2LslReg, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x7a0
@@ -1985,28 +2107,44 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x880
-    op88x_stm_u, op88x_stm_u, op88x_stm_u, op88x_stm_u,
-    op88x_stm_u, op88x_stm_u, op88x_stm_u, op88x_stm_u,
-    op88x_stm_u, op88x_stm_u, op88x_stm_u, op88x_stm_u,
-    op88x_stm_u, op88x_stm_u, op88x_stm_u, op88x_stm_u,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
 
     // 0x890
-    op89x_ldm_u, op89x_ldm_u, op89x_ldm_u, op89x_ldm_u,
-    op89x_ldm_u, op89x_ldm_u, op89x_ldm_u, op89x_ldm_u,
-    op89x_ldm_u, op89x_ldm_u, op89x_ldm_u, op89x_ldm_u,
-    op89x_ldm_u, op89x_ldm_u, op89x_ldm_u, op89x_ldm_u,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
 
     // 0x8a0
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
 
     // 0x8b0
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
 
     // 0x8c0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2027,10 +2165,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x8f0
-    op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw,
-    op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw,
-    op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw,
-    op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
 
     // 0x900
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2045,10 +2187,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x920
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
 
     // 0x930
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2129,196 +2275,196 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0xa00
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa10
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa20
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa30
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa40
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa50
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa60
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa70
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa80
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa90
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xaa0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xab0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xac0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xad0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xae0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xaf0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xb00
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb10
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb20
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb30
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb40
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb50
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb60
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb70
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb80
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb90
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xba0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbb0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbc0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbd0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbe0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbf0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xc00
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2609,98 +2755,98 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0xf00
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf10
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf20
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf30
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf40
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf50
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf60
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf70
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf80
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf90
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfa0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfb0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfc0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfd0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfe0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xff0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 ];
