@@ -56,23 +56,6 @@ impl Instruction {
         imm.rotate_right(rot)
     }
 
-    /// Addressing mode 1: Logical shift left by immediate.
-    fn mode1_register_lshift_imm(self, cpu: &Cpu) -> (u32, bool) {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        match shift {
-            0 => (val, cpu.c()),
-            _ => {
-                let carry = ((val << (shift - 1)) & 0x80000000) != 0;
-
-                (val << shift, carry)
-            }
-        }
-    }
-
     /// Addressing mode 1: Logical shift left by immediate. Used when
     /// shifter carry is not needed.
     fn mode1_register_lshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
@@ -82,89 +65,6 @@ impl Instruction {
         let val = cpu.reg(rm);
 
         val << shift
-    }
-
-    /// Addressing mode 1: Logical shift right by immediate.
-    fn mode1_register_rshift_imm(self, cpu: &Cpu) -> (u32, bool) {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        match shift {
-            // Shift 0 means shift by 32
-            0 => (0, (val as i32) < 0),
-            _ => {
-                let carry = (val >> (shift - 1)) & 1 != 0;
-
-                (val >> shift, carry)
-            }
-        }
-    }
-
-    /// Addressing mode 1: Logical shift right by immediate. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_rshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        match shift {
-            // Shift 0 means shift by 32
-            0 => 0,
-            _ => val >> shift
-        }
-    }
-
-    /// Addressing mode 1: Logical shift right by immediate. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_arshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm) as i32;
-
-        let val =
-            match shift {
-                // Shift 0 means shift by 32, which is like shifting
-                // by 31 when using a signed value (i.e. the sign bit
-                // is replicated all over the 32bits)
-                0 => val >> 31,
-                _ => val >> shift
-            };
-
-        val as u32
-    }
-
-    /// Addressing mode 1: Logical shift left by register. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_lshift_reg_no_carry(self, cpu: &Cpu) -> u32 {
-        let rm = self.rm();
-        let rs = self.rs();
-
-        let val = cpu.reg(rm);
-        let shift = cpu.reg(rs);
-
-        match shift {
-            0...31 => val << shift,
-            _ => 0,
-        }
-    }
-
-    /// Addressing mode 1: Logical shift right by register. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_rshift_reg_no_carry(self, cpu: &Cpu) -> u32 {
-        let rm = self.rm();
-        let rs = self.rs();
-
-        let val = cpu.reg(rm);
-        let shift = cpu.reg(rs);
-
-        match shift {
-            0...31 => val >> shift,
-            _ => 0,
-        }
     }
 
     /// Addressing mode 2: immediate offset
@@ -442,6 +342,38 @@ impl DataAddressingMode for Mode1LsrImm {
     }
 }
 
+struct Mode1AsrImm;
+
+impl DataAddressingMode for Mode1AsrImm {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+        let val   = cpu.reg(rm) as i32;
+
+        let val =
+            match shift {
+                // Shift 0 means shift by 32, which is like shifting
+                // by 31 when using a signed value (i.e. the sign bit
+                // is replicated all over the 32bits)
+                0 => val >> 31,
+                _ => val >> shift
+            };
+
+        val as u32
+    }
+
+    fn value_carry(_instruction: Instruction, _cpu: &Cpu) -> (u32, bool) {
+        unimplemented!();
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        ((instruction.0 >> 20) & 1) == s as u32 &&
+            ((instruction.0 >> 21) & 0xf) == opcode &&
+            ((instruction.0 >> 25) & 7) == 0 &&
+            ((instruction.0 >> 4) & 7) == 0b100
+    }
+}
+
 struct Mode1LslReg;
 
 impl DataAddressingMode for Mode1LslReg {
@@ -466,6 +398,33 @@ impl DataAddressingMode for Mode1LslReg {
             ((instruction.0 >> 21) & 0xf) == opcode &&
             ((instruction.0 >> 25) & 7) == 0 &&
             ((instruction.0 >> 4) & 0xf) == 0b0001
+    }
+}
+
+struct Mode1LsrReg;
+
+impl DataAddressingMode for Mode1LsrReg {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let rm    = instruction.rm();
+        let rs    = instruction.rs();
+        let val   = cpu.reg(rm);
+        let shift = cpu.reg(rs);
+
+        match shift {
+            0...31 => val >> shift,
+            _ => 0,
+        }
+    }
+
+    fn value_carry(_instruction: Instruction, _cpu: &Cpu) -> (u32, bool) {
+        unimplemented!();
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        ((instruction.0 >> 20) & 1) == s as u32 &&
+            ((instruction.0 >> 21) & 0xf) == opcode &&
+            ((instruction.0 >> 25) & 7) == 0 &&
+            ((instruction.0 >> 4) & 0xf) == 0b0011
     }
 }
 
@@ -680,6 +639,36 @@ fn orr<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val);
 }
 
+fn mov<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: DataAddressingMode {
+    let rd  = instruction.rd();
+    let rn  = instruction.rn();
+    let val = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 13, false));
+
+    if rn != RegisterIndex(0) {
+        // "should be zero"
+        panic!("CMP instruction with non-0 Rn");
+    }
+
+    cpu.set_reg(rd, val);
+}
+
+fn movs<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: DataAddressingMode {
+    let rd       = instruction.rd();
+    let (val, c) = M::value_carry(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 13, true));
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
+}
+
 fn mul(instruction: Instruction, cpu: &mut Cpu) {
     let rm  = instruction.rm();
     let rs  = instruction.rs();
@@ -761,63 +750,6 @@ fn op19b_ldrh_pu(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val as u32);
 }
 
-fn op1a0_mov_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op1a1_mov_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let val = instruction.mode1_register_lshift_reg_no_carry(cpu);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op1a2_mov_lsr_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let val = instruction.mode1_register_rshift_imm_no_carry(cpu);
-
-    cpu.set_reg(dst, val);
-}
-
-fn op1a3_mov_lsr_r(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let val = instruction.mode1_register_rshift_reg_no_carry(cpu);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op1a4_mov_asr_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let val = instruction.mode1_register_arshift_imm_no_carry(cpu);
-
-    cpu.set_reg(dst, val);
-}
-
-fn op1b0_mov_lsl_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let (val, carry) = instruction.mode1_register_lshift_imm(cpu);
-
-    cpu.set_reg(rd, val);
-
-    cpu.set_n((val as i32) < 0);
-    cpu.set_z(val == 0);
-    cpu.set_c(carry);
-}
-
-fn op1b2_mov_lsr_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let (val, carry) = instruction.mode1_register_rshift_imm(cpu);
-
-    cpu.set_reg(rd, val);
-
-    cpu.set_n((val as i32) < 0);
-    cpu.set_z(val == 0);
-    cpu.set_c(carry);
-}
-
 fn op1c0_bic_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     let rd  = instruction.rd();
     let rn  = instruction.rn();
@@ -871,19 +803,6 @@ fn op1e0_mvn_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
 
     cpu.set_reg(rd, !val);
-}
-
-fn op3ax_mov_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let rn  = instruction.rn();
-    let val = instruction.mode1_imm_no_carry();
-
-    if rn != RegisterIndex(0) {
-        // "should be zero"
-        panic!("MOV instruction with non-0 Rn");
-    }
-
-    cpu.set_reg(rd, val);
 }
 
 fn op3cx_bic_i(instruction: Instruction, cpu: &mut Cpu) {
@@ -1356,15 +1275,17 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1a0
-    op1a0_mov_lsl_i, op1a1_mov_lsl_r, op1a2_mov_lsr_i, op1a3_mov_lsr_r,
-    op1a4_mov_asr_i, unimplemented, unimplemented, unimplemented,
-    op1a0_mov_lsl_i, unimplemented, op1a2_mov_lsr_i, unimplemented,
-    op1a4_mov_asr_i, unimplemented, unimplemented, unimplemented,
+    mov::<Mode1LslImm>, mov::<Mode1LslReg>,
+    mov::<Mode1LsrImm>, mov::<Mode1LsrReg>,
+    mov::<Mode1AsrImm>, unimplemented, unimplemented, unimplemented,
+    mov::<Mode1LslImm>, unimplemented, mov::<Mode1LsrImm>, unimplemented,
+    mov::<Mode1AsrImm>, unimplemented, unimplemented, unimplemented,
 
     // 0x1b0
-    op1b0_mov_lsl_is, unimplemented, op1b2_mov_lsr_is, unimplemented,
+    movs::<Mode1LslImm>, movs::<Mode1LslReg>,
+    movs::<Mode1LsrImm>, movs::<Mode1LsrReg>,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op1b0_mov_lsl_is, unimplemented, op1b2_mov_lsr_is, unimplemented,
+    movs::<Mode1LslImm>, unimplemented, movs::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1c0
@@ -1549,10 +1470,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x3a0
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
-    op3ax_mov_i, op3ax_mov_i, op3ax_mov_i, op3ax_mov_i,
+    mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>,
+    mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>,
+    mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>,
+    mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>,
 
     // 0x3b0
     unimplemented, unimplemented, unimplemented, unimplemented,
