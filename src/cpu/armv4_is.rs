@@ -356,6 +356,132 @@ impl fmt::Display for Instruction {
     }
 }
 
+/// Addressing mode 1: Data-processing operands
+trait DataAddressingMode {
+    /// Return the value of the operand
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32;
+
+    /// Return the value of the operand along with the ALU carry
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool);
+
+    /// Used to validate that the addressing mode matches the
+    /// instruction (useful for debugging).
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool;
+}
+
+struct Mode1Imm;
+
+impl DataAddressingMode for Mode1Imm {
+    fn value(instruction: Instruction, _: &Cpu) -> u32 {
+        let rot = (instruction.0 >> 8) & 0xf;
+        let imm = instruction.0 & 0xff;
+
+        // Rotation factor is multiplied by two
+        imm.rotate_right(rot)
+    }
+
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool) {
+        let rot = (instruction.0 >> 8) & 0xf;
+        let imm = instruction.0 & 0xff;
+
+        if rot == 0 {
+            (imm, cpu.c())
+        } else {
+            // Rotation factor is multiplied by two
+            let rot = rot << 1;
+
+            let imm = imm.rotate_right(rot);
+
+            let carry_out = (imm as i32) < 0;
+
+            (imm, carry_out)
+        }
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        ((instruction.0 >> 20) & 1) == s as u32 &&
+            ((instruction.0 >> 21) & 0xf) == opcode &&
+            ((instruction.0 >> 25) & 7) == 1
+    }
+}
+
+struct Mode1LslImm;
+
+impl DataAddressingMode for Mode1LslImm {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm = instruction.rm();
+
+        let val = cpu.reg(rm);
+
+        val << shift
+    }
+
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool) {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm = instruction.rm();
+
+        let val = cpu.reg(rm);
+
+        match shift {
+            0 => (val, cpu.c()),
+            _ => {
+                let carry = ((val << (shift - 1)) & 0x80000000) != 0;
+
+                (val << shift, carry)
+            }
+        }
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        ((instruction.0 >> 20) & 1) == s as u32 &&
+            ((instruction.0 >> 21) & 0xf) == opcode &&
+            ((instruction.0 >> 25) & 7) == 0 &&
+            ((instruction.0 >> 4) & 7) == 0
+    }
+}
+
+struct Mode1LsrImm;
+
+impl DataAddressingMode for Mode1LsrImm {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+
+        let val = cpu.reg(rm);
+
+        match shift {
+            // Shift 0 means shift by 32
+            0 => 0,
+            _ => val >> shift
+        }
+    }
+
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool) {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+
+        let val = cpu.reg(rm);
+
+        match shift {
+            // Shift 0 means shift by 32
+            0 => (0, (val as i32) < 0),
+            _ => {
+                let carry = (val >> (shift - 1)) & 1 != 0;
+
+                (val >> shift, carry)
+            }
+        }
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        ((instruction.0 >> 20) & 1) == s as u32 &&
+            ((instruction.0 >> 21) & 0xf) == opcode &&
+            ((instruction.0 >> 25) & 7) == 0 &&
+            ((instruction.0 >> 4) & 7) == 0b010
+    }
+}
+
 fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
     panic!("Unimplemented instruction {} ({:03x})\n{:?}",
            instruction,
@@ -363,45 +489,47 @@ fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
            cpu);
 }
 
-fn op000_and_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn  = instruction.rn();
-    let and = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    let val = cpu.reg(rn) & and;
-
-    cpu.set_reg(dst, val);
-}
-
-fn op002_and_lsr_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn  = instruction.rn();
-    let and = instruction.mode1_register_rshift_imm_no_carry(cpu);
-
-    let val = cpu.reg(rn) & and;
-
-    cpu.set_reg(dst, val);
-}
-
-fn op009_mul(instruction: Instruction, cpu: &mut Cpu) {
-    let rm  = instruction.rm();
-    let rs  = instruction.rs();
-    let rn  = instruction.rn();
-
-    if (instruction.0 & 0xf000) != 0 {
-        // Should be 0
-        panic!("Invalid MUL instruction");
-    }
-
-    let val = cpu.reg(rm).wrapping_mul(cpu.reg(rs));
-
-    cpu.set_reg(rn, val);
-}
-
-fn op020_eor_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
+fn and<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: DataAddressingMode {
     let rd = instruction.rd();
     let rn = instruction.rn();
-    let b  = instruction.mode1_register_lshift_imm_no_carry(cpu);
+    let b = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 0, false));
+
+    let a = cpu.reg(rn);
+
+    let val = a & b;
+
+    cpu.set_reg(rd, val);
+}
+
+fn ands<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: DataAddressingMode {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let (b, carry) = M::value_carry(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 0, true));
+
+    let a = cpu.reg(rn);
+
+    let val = a & b;
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(carry);
+}
+
+fn eor<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: DataAddressingMode {
+    let rd = instruction.rd();
+    let rn = instruction.rn();
+    let b  = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 1, false));
 
     let a = cpu.reg(rn);
 
@@ -410,10 +538,13 @@ fn op020_eor_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op040_sub_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
+fn sub<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: DataAddressingMode {
     let dst = instruction.rd();
     let rn  = instruction.rn();
-    let b   = instruction.mode1_register_lshift_imm_no_carry(cpu);
+    let b   = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 2, false));
 
     let a = cpu.reg(rn);
 
@@ -422,14 +553,28 @@ fn op040_sub_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(dst, val);
 }
 
-fn op050_sub_lsl_is(instruction: Instruction, cpu: &mut Cpu) {
+fn subs<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: DataAddressingMode {
     let rd  = instruction.rd();
     let rn  = instruction.rn();
-    let b   = instruction.mode1_register_lshift_imm_no_carry(cpu);
+    let b   = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 2, true));
 
     let a = cpu.reg(rn);
 
-    instruction.subs(cpu, rd, a, b);
+    let val = a.wrapping_sub(b);
+
+    let a_neg = (a as i32) < 0;
+    let b_neg = (b as i32) < 0;
+    let v_neg = (val as i32) < 0;
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n(v_neg);
+    cpu.set_z(val == 0);
+    cpu.set_c(a >= b);
+    cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
 
@@ -443,6 +588,21 @@ fn op080_add_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     let val = a.wrapping_add(b);
 
     cpu.set_reg(dst, val);
+}
+
+fn mul(instruction: Instruction, cpu: &mut Cpu) {
+    let rm  = instruction.rm();
+    let rs  = instruction.rs();
+    let rn  = instruction.rn();
+
+    if (instruction.0 & 0xf000) != 0 {
+        // Should be 0
+        panic!("Invalid MUL instruction");
+    }
+
+    let val = cpu.reg(rm).wrapping_mul(cpu.reg(rs));
+
+    cpu.set_reg(rn, val);
 }
 
 fn op100_mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
@@ -686,73 +846,6 @@ fn op1e0_mvn_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
     let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
 
     cpu.set_reg(rd, !val);
-}
-
-fn op20x_and_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a & b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op21x_and_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd         = instruction.rd();
-    let rn         = instruction.rn();
-    let (b, carry) = instruction.mode1_imm(cpu);
-
-    if rd.is_pc() {
-        // Should put CPSR in SPSR for some reason
-        panic!("Unimplemented AND {}", instruction);
-    }
-
-    let a = cpu.reg(rn);
-
-    let val = a & b;
-
-    cpu.set_reg(rd, val);
-
-    cpu.set_n((val as i32) < 0);
-    cpu.set_z(val == 0);
-    cpu.set_c(carry);
-}
-
-fn op22x_eor_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a ^ b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op24x_sub_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a.wrapping_sub(b);
-
-    cpu.set_reg(rd, val);
-}
-
-fn op25x_sub_is(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    instruction.subs(cpu, rd, a, b);
 }
 
 fn op26x_rsb_i(instruction: Instruction, cpu: &mut Cpu) {
@@ -1169,9 +1262,9 @@ fn opfxx_swi(_: Instruction, cpu: &mut Cpu) {
 
 static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x000
-    op000_and_lsl_i, unimplemented, op002_and_lsr_i, unimplemented,
+    and::<Mode1LslImm>, unimplemented, and::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op000_and_lsl_i, op009_mul, op002_and_lsr_i, unimplemented,
+    and::<Mode1LslImm>, mul, and::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x010
@@ -1181,9 +1274,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x020
-    op020_eor_lsl_i, unimplemented, unimplemented, unimplemented,
+    eor::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op020_eor_lsl_i, unimplemented, unimplemented, unimplemented,
+    eor::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x030
@@ -1193,15 +1286,15 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x040
-    op040_sub_lsl_i, unimplemented, unimplemented, unimplemented,
+    sub::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op040_sub_lsl_i, unimplemented, unimplemented, unimplemented,
+    sub::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x050
-    op050_sub_lsl_is, unimplemented, unimplemented, unimplemented,
+    subs::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op050_sub_lsl_is, unimplemented, unimplemented, unimplemented,
+    subs::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x060
@@ -1361,22 +1454,22 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x200
-    op20x_and_i, op20x_and_i, op20x_and_i, op20x_and_i,
-    op20x_and_i, op20x_and_i, op20x_and_i, op20x_and_i,
-    op20x_and_i, op20x_and_i, op20x_and_i, op20x_and_i,
-    op20x_and_i, op20x_and_i, op20x_and_i, op20x_and_i,
+    and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>,
+    and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>,
+    and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>,
+    and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>, and::<Mode1Imm>,
 
     // 0x210
-    op21x_and_is, op21x_and_is, op21x_and_is, op21x_and_is,
-    op21x_and_is, op21x_and_is, op21x_and_is, op21x_and_is,
-    op21x_and_is, op21x_and_is, op21x_and_is, op21x_and_is,
-    op21x_and_is, op21x_and_is, op21x_and_is, op21x_and_is,
+    ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>,
+    ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>,
+    ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>,
+    ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>, ands::<Mode1Imm>,
 
     // 0x220
-    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
-    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
-    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
-    op22x_eor_i, op22x_eor_i, op22x_eor_i, op22x_eor_i,
+    eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>,
+    eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>,
+    eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>,
+    eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>,
 
     // 0x230
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1385,16 +1478,16 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x240
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
-    op24x_sub_i, op24x_sub_i, op24x_sub_i, op24x_sub_i,
+    sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>,
+    sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>,
+    sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>,
+    sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>,
 
     // 0x250
-    op25x_sub_is, op25x_sub_is, op25x_sub_is, op25x_sub_is,
-    op25x_sub_is, op25x_sub_is, op25x_sub_is, op25x_sub_is,
-    op25x_sub_is, op25x_sub_is, op25x_sub_is, op25x_sub_is,
-    op25x_sub_is, op25x_sub_is, op25x_sub_is, op25x_sub_is,
+    subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>,
+    subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>,
+    subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>,
+    subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>, subs::<Mode1Imm>,
 
     // 0x260
     op26x_rsb_i, op26x_rsb_i, op26x_rsb_i, op26x_rsb_i,
