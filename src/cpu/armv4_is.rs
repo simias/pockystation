@@ -44,20 +44,6 @@ impl Instruction {
         RegisterIndex(self.0 & 0xf)
     }
 
-    /// Addressing mode 2: immediate offset
-    fn mode2_offset_imm(self) -> u32 {
-        self.0 & 0xfff
-    }
-
-    /// Addressing mode 3: Miscellaneous loads and stores - immediate
-    /// offset
-    fn mode3_imm_hl(self) -> u32 {
-        let hi = (self.0 >> 8) & 0xf;
-        let lo = self.0 & 0xf;
-
-        (hi << 4) | lo
-    }
-
     fn branch_imm_offset(self) -> u32 {
         // offset must be sign-extented
         let offset = (self.0 << 8) as i32;
@@ -687,22 +673,23 @@ fn mul(instruction: Instruction, cpu: &mut Cpu) {
 trait Mode2Addressing {
     /// Decode the address and update the registers
     fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
-        where D: Mode2Dir;
+        where D: ModeDir;
 
     /// Used to validate that the addressing mode matches the
     /// instruction (useful for debugging).
     fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
-        where D: Mode2Dir;
+        where D: ModeDir;
 }
 
-/// Mode 2 "direction" (U) flag
-trait Mode2Dir {
+/// Mode 2, 3, 4 and 5 "direction" (U) flag. Used to know whether the
+/// offset is added or subtracted from the base.
+trait ModeDir {
     fn add() -> bool;
 }
 
 struct Sub;
 
-impl Mode2Dir for Sub {
+impl ModeDir for Sub {
     fn add() -> bool {
         false
     }
@@ -710,7 +697,7 @@ impl Mode2Dir for Sub {
 
 struct Add;
 
-impl Mode2Dir for Add {
+impl ModeDir for Add {
     fn add() -> bool {
         true
     }
@@ -720,9 +707,9 @@ struct Mode2Imm;
 
 impl Mode2Addressing for Mode2Imm {
     fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
-        where D: Mode2Dir {
+        where D: ModeDir {
         let rn     = instruction.rn();
-        let offset = instruction.mode2_offset_imm();
+        let offset = instruction.0 & 0xfff;
 
         let base = cpu.reg(rn);
 
@@ -734,7 +721,7 @@ impl Mode2Addressing for Mode2Imm {
     }
 
     fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
-        where D: Mode2Dir {
+        where D: ModeDir {
         let i = instruction.0;
 
         ((i >> 24) & 0xf) == 0b0101 &&
@@ -748,10 +735,10 @@ struct Mode2ImmPost;
 
 impl Mode2Addressing for Mode2ImmPost {
     fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
-        where D: Mode2Dir {
+        where D: ModeDir {
         let rd     = instruction.rd();
         let rn     = instruction.rn();
-        let offset = instruction.mode2_offset_imm();
+        let offset = instruction.0 & 0xfff;
 
         if rn.is_pc() {
             // Unpredictable
@@ -779,7 +766,7 @@ impl Mode2Addressing for Mode2ImmPost {
     }
 
     fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
-        where D: Mode2Dir {
+        where D: ModeDir {
         let i = instruction.0;
 
         ((i >> 24) & 0xf) == 0b0100 &&
@@ -793,7 +780,7 @@ struct Mode2LslReg;
 
 impl Mode2Addressing for Mode2LslReg {
     fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
-        where D: Mode2Dir {
+        where D: ModeDir {
         let rn    = instruction.rn();
         let rm    = instruction.rm();
         let shift = (instruction.0 >> 7) & 0x1f;
@@ -810,7 +797,7 @@ impl Mode2Addressing for Mode2LslReg {
     }
 
     fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
-        where D: Mode2Dir {
+        where D: ModeDir {
         let i = instruction.0;
 
         ((i >> 24) & 0xf) == 0b0111 &&
@@ -822,7 +809,7 @@ impl Mode2Addressing for Mode2LslReg {
 }
 
 fn ldr<M, D>(instruction: Instruction, cpu: &mut Cpu)
-    where M: Mode2Addressing, D: Mode2Dir {
+    where M: Mode2Addressing, D: ModeDir {
     let rd   = instruction.rd();
     let addr = M::address::<D>(instruction, cpu);
 
@@ -839,7 +826,7 @@ fn ldr<M, D>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn str<M, D>(instruction: Instruction, cpu: &mut Cpu)
-    where M: Mode2Addressing, D: Mode2Dir {
+    where M: Mode2Addressing, D: ModeDir {
     let rd   = instruction.rd();
     let addr = M::address::<D>(instruction, cpu);
 
@@ -856,7 +843,7 @@ fn str<M, D>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn ldrb<M, D>(instruction: Instruction, cpu: &mut Cpu)
-    where M: Mode2Addressing, D: Mode2Dir {
+    where M: Mode2Addressing, D: ModeDir {
     let rd   = instruction.rd();
     let addr = M::address::<D>(instruction, cpu);
 
@@ -868,7 +855,7 @@ fn ldrb<M, D>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn strb<M, D>(instruction: Instruction, cpu: &mut Cpu)
-    where M: Mode2Addressing, D: Mode2Dir {
+    where M: Mode2Addressing, D: ModeDir {
     let rd   = instruction.rd();
     let addr = M::address::<D>(instruction, cpu);
 
@@ -883,6 +870,89 @@ fn strb<M, D>(instruction: Instruction, cpu: &mut Cpu)
     let val = cpu.reg(rd);
 
     cpu.store8(addr, val);
+}
+
+/// Addressing mode 3: Miscellaneous Loads and Stores
+trait Mode3Addressing {
+    /// Decode the address and update the registers
+    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where D: ModeDir;
+
+    /// Used to validate that the addressing mode matches the
+    /// instruction (useful for debugging).
+    fn is_valid<D>(instruction: Instruction,
+                   load: bool,
+                   byte: bool,
+                   signed: bool) -> bool
+        where D: ModeDir;
+}
+
+struct Mode3Imm;
+
+impl Mode3Addressing for Mode3Imm {
+    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where D: ModeDir {
+        let rn = instruction.rn();
+        let hi = (instruction.0 >> 8) & 0xf;
+        let lo = instruction.0 & 0xf;
+
+        let offset = (hi << 4) | lo;
+
+        cpu.reg(rn).wrapping_add(offset)
+    }
+
+    fn is_valid<D>(instruction: Instruction,
+                   load: bool,
+                   byte: bool,
+                   signed: bool) -> bool
+        where D: ModeDir {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0001 &&
+            ((i >> 23) & 1) == D::add() as u32 &&
+            ((i >> 21) & 3) == 2 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 7) & 1) == 1 &&
+            ((i >> 6) & 1) == signed as u32 &&
+            ((i >> 5) & 1) == (!byte) as u32 &&
+            ((i >> 4) & 1) == 1
+    }
+}
+
+fn ldrh<M, D>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode3Addressing, D: ModeDir {
+    let rd   = instruction.rd();
+    let addr = M::address::<D>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<D>(instruction, true, false, false));
+
+    let val = cpu.load16(addr);
+
+    cpu.set_reg(rd, val as u32)
+}
+
+fn strh<M, D>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode3Addressing, D: ModeDir {
+    let rd   = instruction.rd();
+    let addr = M::address::<D>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<D>(instruction, false, false, false));
+
+    let val = cpu.reg(rd);
+
+    cpu.store16(addr, val);
+}
+
+fn ldrsb<M, D>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode3Addressing, D: ModeDir {
+    let rd   = instruction.rd();
+    let addr = M::address::<D>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<D>(instruction, true, true, true));
+
+    let val = cpu.load8(addr) as i8;
+
+    cpu.set_reg(rd, val as u32)
 }
 
 fn mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
@@ -949,42 +1019,6 @@ fn op19b_ldrh_pu(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.load16(addr);
 
     cpu.set_reg(rd, val as u32);
-}
-
-fn op1cb_strh_pui(instruction: Instruction, cpu: &mut Cpu) {
-    let rn     = instruction.rn();
-    let rd     = instruction.rd();
-    let offset = instruction.mode3_imm_hl();
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    let val = cpu.reg(rd);
-
-    cpu.store16(addr, val);
-}
-
-fn op1db_ldrh_pui(instruction: Instruction, cpu: &mut Cpu) {
-    let rn     = instruction.rn();
-    let rd     = instruction.rd();
-    let offset = instruction.mode3_imm_hl();
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    let val = cpu.load16(addr);
-
-    cpu.set_reg(rd, val as u32)
-}
-
-fn op1dd_ldrsb_pui(instruction: Instruction, cpu: &mut Cpu) {
-    let rn     = instruction.rn();
-    let rd     = instruction.rd();
-    let offset = instruction.mode3_imm_hl();
-
-    let addr = cpu.reg(rn).wrapping_add(offset);
-
-    let val = cpu.load8(addr) as i8;
-
-    cpu.set_reg(rd, val as u32)
 }
 
 fn op88x_stm_u(instruction: Instruction, cpu: &mut Cpu) {
@@ -1315,14 +1349,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x1c0
     bic::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    bic::<Mode1LslImm>, unimplemented, unimplemented, op1cb_strh_pui,
+    bic::<Mode1LslImm>, unimplemented, unimplemented, strh::<Mode3Imm, Add>,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1d0
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, op1db_ldrh_pui,
-    unimplemented, op1dd_ldrsb_pui, unimplemented, unimplemented,
+    unimplemented, unimplemented, unimplemented, ldrh::<Mode3Imm, Add>,
+    unimplemented, ldrsb::<Mode3Imm, Add>, unimplemented, unimplemented,
 
     // 0x1e0
     mvn::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
