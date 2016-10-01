@@ -49,16 +49,6 @@ impl Instruction {
         self.0 & 0xfff
     }
 
-    /// Addressing mode 2: Logical shift left by immediate
-    fn mode2_register_lshift(self, cpu: &Cpu) -> u32 {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        val << shift
-    }
-
     /// Addressing mode 3: Miscellaneous loads and stores - immediate
     /// offset
     fn mode3_imm_hl(self) -> u32 {
@@ -84,17 +74,6 @@ impl Instruction {
     /// Register list for load/store multiple.
     fn register_list(self) -> u32 {
         self.0 & 0xffff
-    }
-
-    /// Load a 32 bit value from memory and optionally rotate it based
-    /// on bits [1:0]
-    fn ldr(self, cpu: &mut Cpu, addr: u32) -> u32 {
-        let rot = (addr & 3) * 8;
-        let addr = addr & !3;
-
-        let val = cpu.load32(addr);
-
-        val.rotate_right(rot)
     }
 
     /// Execute an STM instruction. Returns the address of the last
@@ -417,112 +396,6 @@ impl Mode1Addressing for Mode1LsrReg {
     }
 }
 
-/// Addressing mode 2: Load and Store Word or Unsigned Byte
-trait Mode2Addressing {
-    /// Decode the address and update the registers
-    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
-        where D: Mode2Dir;
-
-    /// Used to validate that the addressing mode matches the
-    /// instruction (useful for debugging).
-    fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
-        where D: Mode2Dir;
-}
-
-/// Mode 2 "direction" (U) flag
-trait Mode2Dir {
-    fn add() -> bool;
-}
-
-struct Sub;
-
-impl Mode2Dir for Sub {
-    fn add() -> bool {
-        false
-    }
-}
-
-struct Add;
-
-impl Mode2Dir for Add {
-    fn add() -> bool {
-        true
-    }
-}
-
-struct Mode2Imm;
-
-impl Mode2Addressing for Mode2Imm {
-    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
-        where D: Mode2Dir {
-        let rn     = instruction.rn();
-        let offset = instruction.mode2_offset_imm();
-
-        let base = cpu.reg(rn);
-
-        if D::add() {
-            base.wrapping_add(offset)
-        } else {
-            base.wrapping_sub(offset)
-        }
-    }
-
-    fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
-        where D: Mode2Dir {
-        let i = instruction.0;
-
-        ((i >> 24) & 0xf) == 0b0101 &&
-            ((i >> 20) & 1) == load as u32 &&
-            ((i >> 22) & 1) == byte as u32 &&
-            ((i >> 23) & 1) == D::add() as u32
-    }
-}
-
-struct Mode2ImmPost;
-
-impl Mode2Addressing for Mode2ImmPost {
-    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
-        where D: Mode2Dir {
-        let rd     = instruction.rd();
-        let rn     = instruction.rn();
-        let offset = instruction.mode2_offset_imm();
-
-        if rn.is_pc() {
-            // Unpredictable
-            panic!("PC post-indexed");
-        }
-
-        if rd == rn {
-            // Unpredictable
-            panic!("Writeback indexing with RD == RN");
-        }
-
-        let base = cpu.reg(rn);
-
-        let addr =
-            if D::add() {
-                base.wrapping_add(offset)
-            } else {
-                base.wrapping_sub(offset)
-            };
-
-        // Post index
-        cpu.set_reg(rn, addr);
-
-        base
-    }
-
-    fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
-        where D: Mode2Dir {
-        let i = instruction.0;
-
-        ((i >> 24) & 0xf) == 0b0100 &&
-            ((i >> 20) & 1) == load as u32 &&
-            ((i >> 22) & 1) == byte as u32 &&
-            ((i >> 23) & 1) == D::add() as u32
-    }
-}
-
 fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
     panic!("Unimplemented instruction {} ({:03x})\n{:?}",
            instruction,
@@ -810,6 +683,144 @@ fn mul(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rn, val);
 }
 
+/// Addressing mode 2: Load and Store Word or Unsigned Byte
+trait Mode2Addressing {
+    /// Decode the address and update the registers
+    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where D: Mode2Dir;
+
+    /// Used to validate that the addressing mode matches the
+    /// instruction (useful for debugging).
+    fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where D: Mode2Dir;
+}
+
+/// Mode 2 "direction" (U) flag
+trait Mode2Dir {
+    fn add() -> bool;
+}
+
+struct Sub;
+
+impl Mode2Dir for Sub {
+    fn add() -> bool {
+        false
+    }
+}
+
+struct Add;
+
+impl Mode2Dir for Add {
+    fn add() -> bool {
+        true
+    }
+}
+
+struct Mode2Imm;
+
+impl Mode2Addressing for Mode2Imm {
+    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where D: Mode2Dir {
+        let rn     = instruction.rn();
+        let offset = instruction.mode2_offset_imm();
+
+        let base = cpu.reg(rn);
+
+        if D::add() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        }
+    }
+
+    fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where D: Mode2Dir {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0101 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 22) & 1) == byte as u32 &&
+            ((i >> 23) & 1) == D::add() as u32
+    }
+}
+
+struct Mode2ImmPost;
+
+impl Mode2Addressing for Mode2ImmPost {
+    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where D: Mode2Dir {
+        let rd     = instruction.rd();
+        let rn     = instruction.rn();
+        let offset = instruction.mode2_offset_imm();
+
+        if rn.is_pc() {
+            // Unpredictable
+            panic!("PC post-indexed");
+        }
+
+        if rd == rn {
+            // Unpredictable
+            panic!("Writeback indexing with RD == RN");
+        }
+
+        let base = cpu.reg(rn);
+
+        let addr =
+            if D::add() {
+                base.wrapping_add(offset)
+            } else {
+                base.wrapping_sub(offset)
+            };
+
+        // Post index
+        cpu.set_reg(rn, addr);
+
+        base
+    }
+
+    fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where D: Mode2Dir {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0100 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 22) & 1) == byte as u32 &&
+            ((i >> 23) & 1) == D::add() as u32
+    }
+}
+
+struct Mode2LslReg;
+
+impl Mode2Addressing for Mode2LslReg {
+    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where D: Mode2Dir {
+        let rn    = instruction.rn();
+        let rm    = instruction.rm();
+        let shift = (instruction.0 >> 7) & 0x1f;
+
+        let offset = cpu.reg(rm) << shift;
+
+        let base = cpu.reg(rn);
+
+        if D::add() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        }
+    }
+
+    fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where D: Mode2Dir {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0111 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 22) & 1) == byte as u32 &&
+            ((i >> 23) & 1) == D::add() as u32 &&
+            ((i >> 4) & 7) == 0
+    }
+}
+
 fn ldr<M, D>(instruction: Instruction, cpu: &mut Cpu)
     where M: Mode2Addressing, D: Mode2Dir {
     let rd   = instruction.rd();
@@ -974,36 +985,6 @@ fn op1dd_ldrsb_pui(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.load8(addr) as i8;
 
     cpu.set_reg(rd, val as u32)
-}
-
-
-fn op780_str_ipu(instruction: Instruction, cpu: &mut Cpu) {
-    let src    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_register_lshift(cpu);
-
-    if src.is_pc() {
-        // Implementation defined
-        panic!("PC stored in STR");
-    }
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = cpu.reg(src);
-
-    cpu.store32(addr, val);
-}
-
-fn op790_ldr_ipu(instruction: Instruction, cpu: &mut Cpu) {
-    let dst    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_register_lshift(cpu);
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = instruction.ldr(cpu, addr);
-
-    cpu.set_reg_pc_mask(dst, val);
 }
 
 fn op88x_stm_u(instruction: Instruction, cpu: &mut Cpu) {
@@ -1916,15 +1897,15 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x780
-    op780_str_ipu, unimplemented, unimplemented, unimplemented,
+    str::<Mode2LslReg, Add>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op780_str_ipu, unimplemented, unimplemented, unimplemented,
+    str::<Mode2LslReg, Add>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x790
-    op790_ldr_ipu, unimplemented, unimplemented, unimplemented,
+    ldr::<Mode2LslReg, Add>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op790_ldr_ipu, unimplemented, unimplemented, unimplemented,
+    ldr::<Mode2LslReg, Add>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x7a0
