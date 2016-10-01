@@ -478,6 +478,51 @@ impl Mode2Addressing for Mode2Imm {
     }
 }
 
+struct Mode2ImmPost;
+
+impl Mode2Addressing for Mode2ImmPost {
+    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where D: Mode2Dir {
+        let rd     = instruction.rd();
+        let rn     = instruction.rn();
+        let offset = instruction.mode2_offset_imm();
+
+        if rn.is_pc() {
+            // Unpredictable
+            panic!("PC post-indexed");
+        }
+
+        if rd == rn {
+            // Unpredictable
+            panic!("Writeback indexing with RD == RN");
+        }
+
+        let base = cpu.reg(rn);
+
+        let addr =
+            if D::add() {
+                base.wrapping_add(offset)
+            } else {
+                base.wrapping_sub(offset)
+            };
+
+        // Post index
+        cpu.set_reg(rn, addr);
+
+        base
+    }
+
+    fn is_valid<D>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where D: Mode2Dir {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0100 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 22) & 1) == byte as u32 &&
+            ((i >> 23) & 1) == D::add() as u32
+    }
+}
+
 fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
     panic!("Unimplemented instruction {} ({:03x})\n{:?}",
            instruction,
@@ -799,6 +844,36 @@ fn str<M, D>(instruction: Instruction, cpu: &mut Cpu)
     cpu.store32(addr, val);
 }
 
+fn ldrb<M, D>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode2Addressing, D: Mode2Dir {
+    let rd   = instruction.rd();
+    let addr = M::address::<D>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<D>(instruction, true, true));
+
+    let val = cpu.load8(addr);
+
+    cpu.set_reg_pc_mask(rd, val as u32);
+}
+
+fn strb<M, D>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode2Addressing, D: Mode2Dir {
+    let rd   = instruction.rd();
+    let addr = M::address::<D>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<D>(instruction, false, true));
+
+    if rd.is_pc() {
+        // I think this is actually allowed and should store
+        // cur_instruction + 8 since A2.4.3 only mentions STR and STM
+        panic!("PC stored in STRB");
+    }
+
+    let val = cpu.reg(rd);
+
+    cpu.store8(addr, val);
+}
+
 fn mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.rd();
 
@@ -901,80 +976,6 @@ fn op1dd_ldrsb_pui(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val as u32)
 }
 
-fn op48x_str_u(instruction: Instruction, cpu: &mut Cpu) {
-    let src    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    if src.is_pc() {
-        // Implementation defined
-        panic!("PC stored in STR");
-    }
-
-    if base.is_pc() {
-        // Unpredictable
-        panic!("PC post-indexed");
-    }
-
-    let addr = cpu.reg(base);
-
-    let val = cpu.reg(src);
-
-    cpu.store32(addr, val);
-
-    let post_addr = addr.wrapping_add(offset);
-
-    cpu.set_reg(base, post_addr)
-}
-
-fn op49x_ldr_u(instruction: Instruction, cpu: &mut Cpu) {
-    let rd     = instruction.rd();
-    let rn     = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    if rn.is_pc() {
-        panic!("unpredictable LDR");
-    }
-
-    let addr = cpu.reg(rn);
-
-    let post_addr = addr.wrapping_add(offset);
-
-    let val = instruction.ldr(cpu, addr);
-
-    cpu.set_reg(rn, post_addr);
-    cpu.set_reg_pc_mask(rd, val);
-}
-
-fn op5cx_strb_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let src    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    if src.is_pc() {
-        // Unpredictable (not "implementation defined" like STR
-        // for some reason)
-        panic!("PC stored in STRB");
-    }
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = cpu.reg(src);
-
-    cpu.store8(addr, val);
-}
-
-fn op5dx_ldrb_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let dst    = instruction.rd();
-    let base   = instruction.rn();
-    let offset = instruction.mode2_offset_imm();
-
-    let addr = cpu.reg(base).wrapping_add(offset);
-
-    let val = cpu.load8(addr);
-
-    cpu.set_reg_pc_mask(dst, val as u32);
-}
 
 fn op780_str_ipu(instruction: Instruction, cpu: &mut Cpu) {
     let src    = instruction.rd();
@@ -1595,16 +1596,24 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x480
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
+    str::<Mode2ImmPost, Add>, str::<Mode2ImmPost, Add>,
+    str::<Mode2ImmPost, Add>, str::<Mode2ImmPost, Add>,
+    str::<Mode2ImmPost, Add>, str::<Mode2ImmPost, Add>,
+    str::<Mode2ImmPost, Add>, str::<Mode2ImmPost, Add>,
+    str::<Mode2ImmPost, Add>, str::<Mode2ImmPost, Add>,
+    str::<Mode2ImmPost, Add>, str::<Mode2ImmPost, Add>,
+    str::<Mode2ImmPost, Add>, str::<Mode2ImmPost, Add>,
+    str::<Mode2ImmPost, Add>, str::<Mode2ImmPost, Add>,
 
     // 0x490
-    op49x_ldr_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
-    op48x_str_u, op48x_str_u, op48x_str_u, op48x_str_u,
+    ldr::<Mode2ImmPost, Add>, ldr::<Mode2ImmPost, Add>,
+    ldr::<Mode2ImmPost, Add>, ldr::<Mode2ImmPost, Add>,
+    ldr::<Mode2ImmPost, Add>, ldr::<Mode2ImmPost, Add>,
+    ldr::<Mode2ImmPost, Add>, ldr::<Mode2ImmPost, Add>,
+    ldr::<Mode2ImmPost, Add>, ldr::<Mode2ImmPost, Add>,
+    ldr::<Mode2ImmPost, Add>, ldr::<Mode2ImmPost, Add>,
+    ldr::<Mode2ImmPost, Add>, ldr::<Mode2ImmPost, Add>,
+    ldr::<Mode2ImmPost, Add>, ldr::<Mode2ImmPost, Add>,
 
     // 0x4a0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1731,16 +1740,24 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x5c0
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
-    op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu, op5cx_strb_pu,
+    strb::<Mode2Imm, Add>, strb::<Mode2Imm, Add>,
+    strb::<Mode2Imm, Add>, strb::<Mode2Imm, Add>,
+    strb::<Mode2Imm, Add>, strb::<Mode2Imm, Add>,
+    strb::<Mode2Imm, Add>, strb::<Mode2Imm, Add>,
+    strb::<Mode2Imm, Add>, strb::<Mode2Imm, Add>,
+    strb::<Mode2Imm, Add>, strb::<Mode2Imm, Add>,
+    strb::<Mode2Imm, Add>, strb::<Mode2Imm, Add>,
+    strb::<Mode2Imm, Add>, strb::<Mode2Imm, Add>,
 
     // 0x5d0
-    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
-    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
-    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
-    op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu, op5dx_ldrb_pu,
+    ldrb::<Mode2Imm, Add>, ldrb::<Mode2Imm, Add>,
+    ldrb::<Mode2Imm, Add>, ldrb::<Mode2Imm, Add>,
+    ldrb::<Mode2Imm, Add>, ldrb::<Mode2Imm, Add>,
+    ldrb::<Mode2Imm, Add>, ldrb::<Mode2Imm, Add>,
+    ldrb::<Mode2Imm, Add>, ldrb::<Mode2Imm, Add>,
+    ldrb::<Mode2Imm, Add>, ldrb::<Mode2Imm, Add>,
+    ldrb::<Mode2Imm, Add>, ldrb::<Mode2Imm, Add>,
+    ldrb::<Mode2Imm, Add>, ldrb::<Mode2Imm, Add>,
 
     // 0x5e0
     unimplemented, unimplemented, unimplemented, unimplemented,
