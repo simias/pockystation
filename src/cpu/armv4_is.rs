@@ -200,7 +200,7 @@ impl fmt::Display for Instruction {
 }
 
 /// Addressing mode 1: Data-processing operands
-trait DataAddressingMode {
+trait Mode1Addressing {
     /// Return the value of the operand
     fn value(instruction: Instruction, cpu: &Cpu) -> u32;
 
@@ -214,7 +214,7 @@ trait DataAddressingMode {
 
 struct Mode1Imm;
 
-impl DataAddressingMode for Mode1Imm {
+impl Mode1Addressing for Mode1Imm {
     fn value(instruction: Instruction, _: &Cpu) -> u32 {
         let rot = (instruction.0 >> 8) & 0xf;
         let imm = instruction.0 & 0xff;
@@ -240,15 +240,17 @@ impl DataAddressingMode for Mode1Imm {
     }
 
     fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
-        ((instruction.0 >> 20) & 1) == s as u32 &&
-            ((instruction.0 >> 21) & 0xf) == opcode &&
-            ((instruction.0 >> 25) & 7) == 1
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 1
     }
 }
 
 struct Mode1LslImm;
 
-impl DataAddressingMode for Mode1LslImm {
+impl Mode1Addressing for Mode1LslImm {
     fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
         let shift = (instruction.0 >> 7) & 0x1f;
         let rm    = instruction.rm();
@@ -273,16 +275,18 @@ impl DataAddressingMode for Mode1LslImm {
     }
 
     fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
-        ((instruction.0 >> 20) & 1) == s as u32 &&
-            ((instruction.0 >> 21) & 0xf) == opcode &&
-            ((instruction.0 >> 25) & 7) == 0 &&
-            ((instruction.0 >> 4) & 7) == 0
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 7) == 0
     }
 }
 
 struct Mode1LsrImm;
 
-impl DataAddressingMode for Mode1LsrImm {
+impl Mode1Addressing for Mode1LsrImm {
     fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
         let shift = (instruction.0 >> 7) & 0x1f;
         let rm    = instruction.rm();
@@ -312,16 +316,18 @@ impl DataAddressingMode for Mode1LsrImm {
     }
 
     fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
-        ((instruction.0 >> 20) & 1) == s as u32 &&
-            ((instruction.0 >> 21) & 0xf) == opcode &&
-            ((instruction.0 >> 25) & 7) == 0 &&
-            ((instruction.0 >> 4) & 7) == 0b010
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 7) == 0b010
     }
 }
 
 struct Mode1AsrImm;
 
-impl DataAddressingMode for Mode1AsrImm {
+impl Mode1Addressing for Mode1AsrImm {
     fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
         let shift = (instruction.0 >> 7) & 0x1f;
         let rm    = instruction.rm();
@@ -344,16 +350,18 @@ impl DataAddressingMode for Mode1AsrImm {
     }
 
     fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
-        ((instruction.0 >> 20) & 1) == s as u32 &&
-            ((instruction.0 >> 21) & 0xf) == opcode &&
-            ((instruction.0 >> 25) & 7) == 0 &&
-            ((instruction.0 >> 4) & 7) == 0b100
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 7) == 0b100
     }
 }
 
 struct Mode1LslReg;
 
-impl DataAddressingMode for Mode1LslReg {
+impl Mode1Addressing for Mode1LslReg {
     fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
         let rm    = instruction.rm();
         let rs    = instruction.rs();
@@ -371,16 +379,18 @@ impl DataAddressingMode for Mode1LslReg {
     }
 
     fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
-        ((instruction.0 >> 20) & 1) == s as u32 &&
-            ((instruction.0 >> 21) & 0xf) == opcode &&
-            ((instruction.0 >> 25) & 7) == 0 &&
-            ((instruction.0 >> 4) & 0xf) == 0b0001
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 0xf) == 0b0001
     }
 }
 
 struct Mode1LsrReg;
 
-impl DataAddressingMode for Mode1LsrReg {
+impl Mode1Addressing for Mode1LsrReg {
     fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
         let rm    = instruction.rm();
         let rs    = instruction.rs();
@@ -398,10 +408,12 @@ impl DataAddressingMode for Mode1LsrReg {
     }
 
     fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
-        ((instruction.0 >> 20) & 1) == s as u32 &&
-            ((instruction.0 >> 21) & 0xf) == opcode &&
-            ((instruction.0 >> 25) & 7) == 0 &&
-            ((instruction.0 >> 4) & 0xf) == 0b0011
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 0xf) == 0b0011
     }
 }
 
@@ -474,7 +486,7 @@ fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
 }
 
 fn and<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
     let b  = M::value(instruction, cpu);
@@ -489,7 +501,7 @@ fn and<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn ands<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd     = instruction.rd();
     let rn     = instruction.rn();
     let (b, c) = M::value_carry(instruction, cpu);
@@ -508,7 +520,7 @@ fn ands<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn eor<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
     let b  = M::value(instruction, cpu);
@@ -523,7 +535,7 @@ fn eor<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn sub<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let dst = instruction.rd();
     let rn  = instruction.rn();
     let b   = M::value(instruction, cpu);
@@ -538,7 +550,7 @@ fn sub<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn subs<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd  = instruction.rd();
     let rn  = instruction.rn();
     let b   = M::value(instruction, cpu);
@@ -562,7 +574,7 @@ fn subs<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn rsb<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
     let a  = M::value(instruction, cpu);
@@ -577,7 +589,7 @@ fn rsb<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn rsbs<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
     let a  = M::value(instruction, cpu);
@@ -601,7 +613,7 @@ fn rsbs<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn add<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let dst = instruction.rd();
     let rn  = instruction.rn();
     let b   = M::value(instruction, cpu);
@@ -616,7 +628,7 @@ fn add<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn tst<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rn       = instruction.rn();
     let rd       = instruction.rd();
     let (imm, c) = M::value_carry(instruction, cpu);
@@ -636,7 +648,7 @@ fn tst<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn cmp<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rn  = instruction.rn();
     let rd  = instruction.rd();
     let b   = M::value(instruction, cpu);
@@ -663,7 +675,7 @@ fn cmp<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn orr<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
     let b  = M::value(instruction, cpu);
@@ -678,7 +690,7 @@ fn orr<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn mov<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd  = instruction.rd();
     let rn  = instruction.rn();
     let val = M::value(instruction, cpu);
@@ -694,7 +706,7 @@ fn mov<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn movs<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd       = instruction.rd();
     let (val, c) = M::value_carry(instruction, cpu);
 
@@ -708,7 +720,7 @@ fn movs<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn bic<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let rd  = instruction.rd();
     let rn  = instruction.rn();
     let b   = M::value(instruction, cpu);
@@ -723,7 +735,7 @@ fn bic<M>(instruction: Instruction, cpu: &mut Cpu)
 }
 
 fn mvn<M>(instruction: Instruction, cpu: &mut Cpu)
-    where M: DataAddressingMode {
+    where M: Mode1Addressing {
     let dst = instruction.rd();
     let rn = instruction.rn();
     let val = M::value(instruction, cpu);
