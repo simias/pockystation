@@ -44,29 +44,6 @@ impl Instruction {
         RegisterIndex(self.0 & 0xf)
     }
 
-    /// Addressing mode 1: 32bit immediate value. Used when shifter
-    /// carry is not needed.
-    fn mode1_imm_no_carry(self) -> u32 {
-        let rot = (self.0 >> 8) & 0xf;
-        let imm = self.0 & 0xff;
-
-        // Rotation factor is multiplied by two
-        let rot = rot << 1;
-
-        imm.rotate_right(rot)
-    }
-
-    /// Addressing mode 1: Logical shift left by immediate. Used when
-    /// shifter carry is not needed.
-    fn mode1_register_lshift_imm_no_carry(self, cpu: &Cpu) -> u32 {
-        let shift = (self.0 >> 7) & 0x1f;
-        let rm    = self.rm();
-
-        let val = cpu.reg(rm);
-
-        val << shift
-    }
-
     /// Addressing mode 2: immediate offset
     fn mode2_offset_imm(self) -> u32 {
         self.0 & 0xfff
@@ -669,6 +646,35 @@ fn movs<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_c(c);
 }
 
+fn bic<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: DataAddressingMode {
+    let rd  = instruction.rd();
+    let rn  = instruction.rn();
+    let b   = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 14, false));
+
+    let a = cpu.reg(rn);
+
+    let val = a & !b;
+
+    cpu.set_reg(rd, val);
+}
+
+fn mvn<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: DataAddressingMode {
+    let dst = instruction.rd();
+    let rn = instruction.rn();
+    let val = M::value(instruction, cpu);
+
+    if rn != RegisterIndex(0) {
+        // "should be zero"
+        panic!("MVN instruction with non-0 Rn");
+    }
+
+    cpu.set_reg(dst, !val);
+}
+
 fn mul(instruction: Instruction, cpu: &mut Cpu) {
     let rm  = instruction.rm();
     let rs  = instruction.rs();
@@ -684,7 +690,7 @@ fn mul(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rn, val);
 }
 
-fn op100_mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
+fn mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.rd();
 
     if (instruction.0 & 0xf0fff) != 0xf0000 {
@@ -696,7 +702,7 @@ fn op100_mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, cpsr);
 }
 
-fn op120_msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
+fn msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     let rm   = instruction.rm();
     let mask = instruction.msr_field_mask();
 
@@ -709,7 +715,7 @@ fn op120_msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.msr_cpsr(val, mask);
 }
 
-fn op121_bx(instruction: Instruction, cpu: &mut Cpu) {
+fn bx(instruction: Instruction, cpu: &mut Cpu) {
     let rm = instruction.rm();
 
     if (instruction.0 & 0xfff00) != 0xfff00 {
@@ -726,7 +732,7 @@ fn op121_bx(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc_thumb(address, thumb);
 }
 
-fn op140_mrs_spsr(instruction: Instruction, cpu: &mut Cpu) {
+fn mrs_spsr(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.rd();
 
     if rd.is_pc() || (instruction.0 & 0xf0fff) != 0xf0000 {
@@ -748,18 +754,6 @@ fn op19b_ldrh_pu(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.load16(addr);
 
     cpu.set_reg(rd, val as u32);
-}
-
-fn op1c0_bic_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let rn  = instruction.rn();
-    let b   = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    let a = cpu.reg(rn);
-
-    let val = a & !b;
-
-    cpu.set_reg(rd, val);
 }
 
 fn op1cb_strh_pui(instruction: Instruction, cpu: &mut Cpu) {
@@ -796,38 +790,6 @@ fn op1dd_ldrsb_pui(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.load8(addr) as i8;
 
     cpu.set_reg(rd, val as u32)
-}
-
-fn op1e0_mvn_lsl_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd  = instruction.rd();
-    let val = instruction.mode1_register_lshift_imm_no_carry(cpu);
-
-    cpu.set_reg(rd, !val);
-}
-
-fn op3cx_bic_i(instruction: Instruction, cpu: &mut Cpu) {
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-    let b  = instruction.mode1_imm_no_carry();
-
-    let a = cpu.reg(rn);
-
-    let val = a & !b;
-
-    cpu.set_reg(rd, val);
-}
-
-fn op3ex_mvn_i(instruction: Instruction, cpu: &mut Cpu) {
-    let dst = instruction.rd();
-    let rn = instruction.rn();
-    let val = instruction.mode1_imm_no_carry();
-
-    if rn != RegisterIndex(0) {
-        // "should be zero"
-        panic!("MVN instruction with non-0 Rn");
-    }
-
-    cpu.set_reg(dst, !val);
 }
 
 fn op48x_str_u(instruction: Instruction, cpu: &mut Cpu) {
@@ -1093,7 +1055,7 @@ fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rn, start_addr);
 }
 
-fn opaxx_b(instruction: Instruction, cpu: &mut Cpu) {
+fn b(instruction: Instruction, cpu: &mut Cpu) {
     let offset = instruction.branch_imm_offset();
 
     let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
@@ -1101,7 +1063,7 @@ fn opaxx_b(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc(pc);
 }
 
-fn opbxx_bl(instruction: Instruction, cpu: &mut Cpu) {
+fn bl(instruction: Instruction, cpu: &mut Cpu) {
     let offset = instruction.branch_imm_offset();
 
     let pc = cpu.registers[15].wrapping_add(offset);
@@ -1113,7 +1075,7 @@ fn opbxx_bl(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc(pc);
 }
 
-fn opfxx_swi(_: Instruction, cpu: &mut Cpu) {
+fn swi(_: Instruction, cpu: &mut Cpu) {
     cpu.swi();
 }
 
@@ -1215,7 +1177,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x100
-    op100_mrs_cpsr, unimplemented, unimplemented, unimplemented,
+    mrs_cpsr, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1227,7 +1189,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x120
-    op120_msr_cpsr, op121_bx, unimplemented, unimplemented,
+    msr_cpsr, bx, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1239,7 +1201,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x140
-    op140_mrs_spsr, unimplemented, unimplemented, unimplemented,
+    mrs_spsr, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1289,9 +1251,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1c0
-    op1c0_bic_lsl_i, unimplemented, unimplemented, unimplemented,
+    bic::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op1c0_bic_lsl_i, unimplemented, unimplemented, op1cb_strh_pui,
+    bic::<Mode1LslImm>, unimplemented, unimplemented, op1cb_strh_pui,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1d0
@@ -1301,9 +1263,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, op1dd_ldrsb_pui, unimplemented, unimplemented,
 
     // 0x1e0
-    op1e0_mvn_lsl_i, unimplemented, unimplemented, unimplemented,
+    mvn::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    op1e0_mvn_lsl_i, unimplemented, unimplemented, unimplemented,
+    mvn::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1f0
@@ -1482,10 +1444,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x3c0
-    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
-    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
-    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
-    op3cx_bic_i, op3cx_bic_i, op3cx_bic_i, op3cx_bic_i,
+    bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>,
+    bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>,
+    bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>,
+    bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>,
 
     // 0x3d0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1494,10 +1456,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x3e0
-    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
-    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
-    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
-    op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i, op3ex_mvn_i,
+    mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>,
+    mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>,
+    mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>,
+    mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>,
 
     // 0x3f0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2082,196 +2044,196 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0xa00
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa10
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa20
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa30
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa40
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa50
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa60
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa70
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa80
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xa90
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xaa0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xab0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xac0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xad0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xae0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xaf0
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
-    opaxx_b, opaxx_b, opaxx_b, opaxx_b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
+    b, b, b, b,
 
     // 0xb00
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb10
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb20
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb30
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb40
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb50
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb60
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb70
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb80
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xb90
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xba0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbb0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbc0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbd0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbe0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xbf0
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
-    opbxx_bl, opbxx_bl, opbxx_bl, opbxx_bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
+    bl, bl, bl, bl,
 
     // 0xc00
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2562,98 +2524,98 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0xf00
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf10
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf20
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf30
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf40
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf50
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf60
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf70
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf80
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xf90
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfa0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfb0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfc0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfd0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xfe0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 
     // 0xff0
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
-    opfxx_swi, opfxx_swi, opfxx_swi, opfxx_swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
+    swi, swi, swi, swi,
 ];
