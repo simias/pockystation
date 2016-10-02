@@ -898,7 +898,13 @@ impl Mode3Addressing for Mode3Imm {
 
         let offset = (hi << 4) | lo;
 
-        cpu.reg(rn).wrapping_add(offset)
+        let base = cpu.reg(rn);
+
+        if D::add() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        }
     }
 
     fn is_valid<D>(instruction: Instruction,
@@ -913,6 +919,42 @@ impl Mode3Addressing for Mode3Imm {
             ((i >> 21) & 3) == 2 &&
             ((i >> 20) & 1) == load as u32 &&
             ((i >> 7) & 1) == 1 &&
+            ((i >> 6) & 1) == signed as u32 &&
+            ((i >> 5) & 1) == (!byte) as u32 &&
+            ((i >> 4) & 1) == 1
+    }
+}
+
+struct Mode3Reg;
+
+impl Mode3Addressing for Mode3Reg {
+    fn address<D>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where D: ModeDir {
+        let rn = instruction.rn();
+        let rm = instruction.rm();
+
+        let base = cpu.reg(rn);
+        let offset = cpu.reg(rm);
+
+        if D::add() {
+            base.wrapping_add(offset)
+        } else {
+            base.wrapping_sub(offset)
+        }
+    }
+
+    fn is_valid<D>(instruction: Instruction,
+                   load: bool,
+                   byte: bool,
+                   signed: bool) -> bool
+        where D: ModeDir {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0001 &&
+            ((i >> 23) & 1) == D::add() as u32 &&
+            ((i >> 21) & 3) == 0 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 7) & 0x1f) == 1 &&
             ((i >> 6) & 1) == signed as u32 &&
             ((i >> 5) & 1) == (!byte) as u32 &&
             ((i >> 4) & 1) == 1
@@ -953,6 +995,198 @@ fn ldrsb<M, D>(instruction: Instruction, cpu: &mut Cpu)
     let val = cpu.load8(addr) as i8;
 
     cpu.set_reg(rd, val as u32)
+}
+
+trait ModeFlag {
+    #[inline(always)]
+    fn is_set() -> bool;
+    #[inline(always)]
+    fn is_clear() -> bool {
+        !Self::is_set()
+    }
+}
+
+struct Set;
+
+impl ModeFlag for Set {
+    #[inline(always)]
+    fn is_set() -> bool {
+        true
+    }
+}
+
+struct Clear;
+
+impl ModeFlag for Clear {
+    #[inline(always)]
+    fn is_set() -> bool {
+        false
+    }
+}
+
+fn ldm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
+    where U: ModeFlag, P: ModeFlag, W: ModeFlag {
+    let rn   = instruction.rn();
+    let list = instruction.register_list();
+
+    let base_in_list = (list & (1 << rn.0)) != 0;
+
+    debug_assert!({
+        let i = instruction.0;
+
+        ((i >> 25) & 7) == 0b100 &&
+            ((i >> 24) & 1) == P::is_set() as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 22) & 1) == 0 &&
+            ((i >> 21) & 1) == W::is_set() as u32 &&
+            ((i >> 20) & 1) == 1 as u32
+    });
+
+    if list == 0 || rn.is_pc() ||
+        (W::is_set() && base_in_list) {
+        panic!("Unpredictable LDM");
+    }
+
+    let list_len = list.count_ones();
+    let base = cpu.reg(rn);
+
+    let mut addr =
+        if U::is_set() {
+            base
+        } else {
+            base - list_len * 4 + 4
+        };
+
+    for i in 0..16 {
+        if ((list >> i) & 1) != 0 {
+            if P::is_set() {
+                if U::is_set() {
+                    addr = addr.wrapping_add(4);
+                } else {
+                    addr = addr.wrapping_sub(4);
+                }
+            }
+
+            let reg = RegisterIndex(i);
+
+            let val = cpu.load32(addr);
+
+            cpu.set_reg_pc_mask(reg, val);
+
+            if P::is_clear() {
+                if U::is_set() {
+                    addr = addr.wrapping_add(4);
+                } else {
+                    addr = addr.wrapping_sub(4);
+                }
+            }
+        }
+    }
+
+    if W::is_set() {
+        cpu.set_reg(rn, addr);
+    }
+}
+
+// This opcode can have two meanings depending on whether PC is
+// specified in the register list or not.
+//
+// If PC is set then it's LDM(3) it loads the registers normally and
+// then copies the SPSR into the CPSR.
+//
+// If PC is missing then it's LDM(2) and it loads *user mode*
+// registers.
+fn ldms<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
+    where U: ModeFlag, P: ModeFlag, W: ModeFlag {
+    let rn   = instruction.rn();
+    let list = instruction.register_list();
+
+    let base_in_list = (list & (1 << rn.0)) != 0;
+
+    debug_assert!({
+        let i = instruction.0;
+
+        ((i >> 25) & 7) == 0b100 &&
+            ((i >> 24) & 1) == P::is_set() as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 22) & 1) == 1 &&
+            ((i >> 21) & 1) == W::is_set() as u32 &&
+            ((i >> 20) & 1) == 1 as u32
+    });
+
+    if list == 0 || rn.is_pc() ||
+        (W::is_set() && base_in_list) {
+        panic!("Unpredictable LDM");
+    }
+
+    // The presence of PC in the list tells us which instruction this
+    // is
+    let load_spsr = (list & (1 << 15)) != 0;
+
+    if !load_spsr {
+        debug_assert!(W::is_clear());
+    }
+
+    let list_len = list.count_ones();
+    let base = cpu.reg(rn);
+
+    let mut addr =
+        if U::is_set() {
+            base
+        } else {
+            base - list_len * 4 + 4
+        };
+
+    let mut pc = 0;
+
+    for i in 0..16 {
+        if ((list >> i) & 1) != 0 {
+            if P::is_set() {
+                if U::is_set() {
+                    addr = addr.wrapping_add(4);
+                } else {
+                    addr = addr.wrapping_sub(4);
+                }
+            }
+
+            let reg = RegisterIndex(i);
+
+            let val = cpu.load32(addr);
+
+            if load_spsr {
+                if i == 15 {
+                    // Don't load the PC just now, we also need to
+                    // restore the SPSR *but* we want to wait until
+                    // the writeback is handled, otherwise we might
+                    // update a register in the wrong mode.
+                    pc = cpu.load32(addr);
+                } else {
+                    cpu.set_reg(reg, val);
+                }
+            } else {
+                // XXX Implement user-mode loading
+                unimplemented!();
+            }
+
+            if P::is_clear() {
+                if U::is_set() {
+                    addr = addr.wrapping_add(4);
+                } else {
+                    addr = addr.wrapping_sub(4);
+                }
+            }
+        }
+    }
+
+    if W::is_set() {
+        cpu.set_reg(rn, addr);
+    }
+
+    if load_spsr {
+        let spsr = cpu.spsr();
+
+        cpu.set_pc_cpsr(pc, spsr);
+    }
 }
 
 fn mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
@@ -1009,18 +1243,6 @@ fn mrs_spsr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op19b_ldrh_pu(instruction: Instruction, cpu: &mut Cpu) {
-    let rm = instruction.rm();
-    let rd = instruction.rd();
-    let rn = instruction.rn();
-
-    let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
-
-    let val = cpu.load16(addr);
-
-    cpu.set_reg(rd, val as u32);
-}
-
 fn op88x_stm_u(instruction: Instruction, cpu: &mut Cpu) {
     let rn = instruction.rn();
 
@@ -1031,29 +1253,6 @@ fn op88x_stm_u(instruction: Instruction, cpu: &mut Cpu) {
     let start_addr = cpu.reg(rn);
 
     instruction.stm(cpu, start_addr);
-}
-
-fn op89x_ldm_u(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc()  {
-        panic!("Unpredictable LDM");
-    }
-
-    let mut addr = cpu.reg(rn);
-
-    for i in 0..16 {
-        if ((list >> i) & 1) != 0 {
-            let reg = RegisterIndex(i);
-
-            let val = cpu.load32(addr);
-
-            cpu.set_reg_pc_mask(reg, val);
-
-            addr = addr.wrapping_add(4);
-        }
-    }
 }
 
 fn op8ax_stm_uw(instruction: Instruction, cpu: &mut Cpu) {
@@ -1068,69 +1267,6 @@ fn op8ax_stm_uw(instruction: Instruction, cpu: &mut Cpu) {
     let end_addr = instruction.stm(cpu, start_addr);
 
     cpu.set_reg(rn, end_addr);
-}
-
-fn op8bx_ldm_uw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc() || (list & (1 << rn.0)) != 0 {
-        // Can't load to the base register if we want writeback
-        panic!("Unpredictable LDM");
-    }
-
-    let mut addr = cpu.reg(rn);
-
-    for i in 0..16 {
-        if ((list >> i) & 1) != 0 {
-            let reg = RegisterIndex(i);
-
-            let val = cpu.load32(addr);
-
-            cpu.set_reg_pc_mask(reg, val);
-
-            addr = addr.wrapping_add(4);
-        }
-    }
-
-    cpu.set_reg(rn, addr);
-}
-
-fn op8fx_ldm_spsr_uw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc() || (list & (1 << rn.0)) != 0 {
-        // Can't load to the base register if we want writeback
-        panic!("Unpredictable LDM");
-    }
-
-    if (list & (1 << 15)) == 0 {
-        panic!("LDM SPSR without PC!");
-    }
-
-    let mut addr = cpu.reg(rn);
-
-    for i in 0..15 {
-        if ((list >> i) & 1) != 0 {
-            let reg = RegisterIndex(i);
-
-            let val = cpu.load32(addr);
-
-            cpu.set_reg(reg, val);
-
-            addr = addr.wrapping_add(4);
-        }
-    }
-
-    let pc = cpu.load32(addr);
-    addr = addr.wrapping_add(4);
-
-    cpu.set_reg(rn, addr);
-
-    let spsr = cpu.spsr();
-
-    cpu.set_pc_cpsr(pc, spsr);
 }
 
 fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
@@ -1329,7 +1465,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x190
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, op19b_ldrh_pu,
+    unimplemented, unimplemented, unimplemented, ldrh::<Mode3Reg, Add>,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1a0
@@ -2033,10 +2169,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     op88x_stm_u, op88x_stm_u, op88x_stm_u, op88x_stm_u,
 
     // 0x890
-    op89x_ldm_u, op89x_ldm_u, op89x_ldm_u, op89x_ldm_u,
-    op89x_ldm_u, op89x_ldm_u, op89x_ldm_u, op89x_ldm_u,
-    op89x_ldm_u, op89x_ldm_u, op89x_ldm_u, op89x_ldm_u,
-    op89x_ldm_u, op89x_ldm_u, op89x_ldm_u, op89x_ldm_u,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
+    ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
 
     // 0x8a0
     op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
@@ -2045,10 +2185,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
 
     // 0x8b0
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
-    op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw, op8bx_ldm_uw,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
+    ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
 
     // 0x8c0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2069,10 +2213,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x8f0
-    op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw,
-    op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw,
-    op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw,
-    op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw, op8fx_ldm_spsr_uw,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
+    ldms::<Set, Clear, Set>, ldms::<Set, Clear, Set>,
 
     // 0x900
     unimplemented, unimplemented, unimplemented, unimplemented,
