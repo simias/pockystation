@@ -407,6 +407,10 @@ fn ands<M>(instruction: Instruction, cpu: &mut Cpu)
 
     debug_assert!(M::is_valid(instruction, 0, true));
 
+    if rd.is_pc() {
+        panic!("*S instruction with PC target");
+    }
+
     let a = cpu.reg(rn);
 
     let val = a & b;
@@ -441,6 +445,10 @@ fn eors<M>(instruction: Instruction, cpu: &mut Cpu)
 
     debug_assert!(M::is_valid(instruction, 1, true));
 
+    if rd.is_pc() {
+        panic!("*S instruction with PC target");
+    }
+
     let a = cpu.reg(rn);
 
     let val = a ^ b;
@@ -474,6 +482,10 @@ fn subs<M>(instruction: Instruction, cpu: &mut Cpu)
     let b   = M::value(instruction, cpu);
 
     debug_assert!(M::is_valid(instruction, 2, true));
+
+    if rd.is_pc() {
+        panic!("*S instruction with PC target");
+    }
 
     let a = cpu.reg(rn);
 
@@ -513,6 +525,10 @@ fn rsbs<M>(instruction: Instruction, cpu: &mut Cpu)
     let a  = M::value(instruction, cpu);
 
     debug_assert!(M::is_valid(instruction, 3, true));
+
+    if rd.is_pc() {
+        panic!("*S instruction with PC target");
+    }
 
     let b = cpu.reg(rn);
 
@@ -645,6 +661,10 @@ fn movs<M>(instruction: Instruction, cpu: &mut Cpu)
     let (val, c) = M::value_carry(instruction, cpu);
 
     debug_assert!(M::is_valid(instruction, 13, true));
+
+    if rd.is_pc() {
+        panic!("*S instruction with PC target");
+    }
 
     cpu.set_reg(rd, val);
 
