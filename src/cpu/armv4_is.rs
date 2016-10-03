@@ -433,6 +433,25 @@ fn eor<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val);
 }
 
+fn eors<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd     = instruction.rd();
+    let rn     = instruction.rn();
+    let (b, c) = M::value_carry(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 1, true));
+
+    let a = cpu.reg(rn);
+
+    let val = a ^ b;
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
+}
+
 fn sub<M>(instruction: Instruction, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let dst = instruction.rd();
@@ -1517,10 +1536,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>, eor::<Mode1Imm>,
 
     // 0x230
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    eors::<Mode1Imm>, eors::<Mode1Imm>, eors::<Mode1Imm>, eors::<Mode1Imm>,
+    eors::<Mode1Imm>, eors::<Mode1Imm>, eors::<Mode1Imm>, eors::<Mode1Imm>,
+    eors::<Mode1Imm>, eors::<Mode1Imm>, eors::<Mode1Imm>, eors::<Mode1Imm>,
+    eors::<Mode1Imm>, eors::<Mode1Imm>, eors::<Mode1Imm>, eors::<Mode1Imm>,
 
     // 0x240
     sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>, sub::<Mode1Imm>,
