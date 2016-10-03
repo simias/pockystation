@@ -273,8 +273,21 @@ impl Mode1Addressing for Mode1AsrImm {
         val as u32
     }
 
-    fn value_carry(_instruction: Instruction, _cpu: &Cpu) -> (u32, bool) {
-        unimplemented!();
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool) {
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+        let val   = cpu.reg(rm) as i32;
+
+        let (val, c) =
+            match shift {
+                // Shift 0 means shift by 32, which is like shifting
+                // by 31 when using a signed value (i.e. the sign bit
+                // is replicated all over the 32bits)
+                0 => (val >> 31, val < 0),
+                _ => (val >> shift, (val >> (shift - 1)) & 1 != 0),
+            };
+
+        (val as u32, c)
     }
 
     fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
@@ -579,9 +592,9 @@ fn adc<M>(instruction: Instruction, cpu: &mut Cpu)
 
 fn tst<M>(instruction: Instruction, cpu: &mut Cpu)
     where M: Mode1Addressing {
-    let rn       = instruction.rn();
-    let rd       = instruction.rd();
-    let (imm, c) = M::value_carry(instruction, cpu);
+    let rn     = instruction.rn();
+    let rd     = instruction.rd();
+    let (b, c) = M::value_carry(instruction, cpu);
 
     debug_assert!(M::is_valid(instruction, 8, true));
 
@@ -590,7 +603,31 @@ fn tst<M>(instruction: Instruction, cpu: &mut Cpu)
         panic!("TST instruction with non-0 Rd");
     }
 
-    let val = cpu.reg(rn) & imm;
+    let a = cpu.reg(rn);
+
+    let val = a & b;
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
+}
+
+fn teq<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rn     = instruction.rn();
+    let rd     = instruction.rd();
+    let (b, c) = M::value_carry(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 9, true));
+
+    if rd != RegisterIndex(0) {
+        // "should be zero"
+        panic!("TEQ instruction with non-0 Rd");
+    }
+
+    let a = cpu.reg(rn);
+
+    let val = a ^ b;
 
     cpu.set_n((val as i32) < 0);
     cpu.set_z(val == 0);
@@ -624,6 +661,33 @@ fn cmp<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
+fn cmn<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rn  = instruction.rn();
+    let rd  = instruction.rd();
+    let b   = M::value(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 11, true));
+
+    if rd != RegisterIndex(0) {
+        // "should be zero"
+        panic!("CMP instruction with non-0 Rd");
+    }
+
+    let a = cpu.reg(rn);
+
+    let val = a.wrapping_add(b);
+
+    let a_neg = (a as i32) < 0;
+    let b_neg = (b as i32) < 0;
+    let v_neg = (val as i32) < 0;
+
+    cpu.set_n(v_neg);
+    cpu.set_z(val == 0);
+    cpu.set_c(a >= b);
+    cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
+}
+
 fn orr<M>(instruction: Instruction, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd = instruction.rd();
@@ -637,6 +701,29 @@ fn orr<M>(instruction: Instruction, cpu: &mut Cpu)
     let val = a | b;
 
     cpu.set_reg(rd, val);
+}
+
+fn orrs<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd     = instruction.rd();
+    let rn     = instruction.rn();
+    let (b, c) = M::value_carry(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 12, true));
+
+    if rd.is_pc() {
+        panic!("*S instruction with PC target");
+    }
+
+    let a = cpu.reg(rn);
+
+    let val = a | b;
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
 }
 
 fn mov<M>(instruction: Instruction, cpu: &mut Cpu)
@@ -707,7 +794,8 @@ fn mvn<M>(instruction: Instruction, cpu: &mut Cpu)
 fn mul(instruction: Instruction, cpu: &mut Cpu) {
     let rm  = instruction.rm();
     let rs  = instruction.rs();
-    let rn  = instruction.rn();
+    // This instruction places Rd where Rn usually is
+    let rd  = instruction.rn();
 
     if (instruction.0 & 0xf000) != 0 {
         // Should be 0
@@ -716,7 +804,19 @@ fn mul(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.reg(rm).wrapping_mul(cpu.reg(rs));
 
-    cpu.set_reg(rn, val);
+    cpu.set_reg(rd, val);
+}
+
+fn mla(instruction: Instruction, cpu: &mut Cpu) {
+    let rm  = instruction.rm();
+    let rs  = instruction.rs();
+    // This instruction switches Rd and Rn
+    let rd  = instruction.rn();
+    let rn  = instruction.rd();
+
+    let val = cpu.reg(rm).wrapping_mul(cpu.reg(rs)).wrapping_add(cpu.reg(rn));
+
+    cpu.set_reg(rd, val);
 }
 
 /// Since we can't use boolean varibales as a generic parameter I use
@@ -1026,6 +1126,18 @@ fn ldrh<M, U>(instruction: Instruction, cpu: &mut Cpu)
     debug_assert!(M::is_valid::<U>(instruction, true, false, false));
 
     let val = cpu.load16(addr);
+
+    cpu.set_reg(rd, val as u32)
+}
+
+fn ldrsh<M, U>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode3Addressing, U: ModeFlag {
+    let rd   = instruction.rd();
+    let addr = M::address::<U>(instruction, cpu);
+
+    debug_assert!(M::is_valid::<U>(instruction, true, false, true));
+
+    let val = cpu.load16(addr) as i16;
 
     cpu.set_reg(rd, val as u32)
 }
@@ -1358,31 +1470,31 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x020
     eor::<Mode1LslImm>, unimplemented, eor::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    eor::<Mode1LslImm>, unimplemented, eor::<Mode1LsrImm>, unimplemented,
+    eor::<Mode1LslImm>, mla, eor::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x030
     unimplemented, unimplemented, unimplemented, unimplemented,
+    eors::<Mode1AsrImm>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    eors::<Mode1AsrImm>, unimplemented, unimplemented, unimplemented,
 
     // 0x040
-    sub::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
+    sub::<Mode1LslImm>, unimplemented, sub::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    sub::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
+    sub::<Mode1LslImm>, unimplemented, sub::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x050
-    subs::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
+    subs::<Mode1LslImm>, unimplemented, subs::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    subs::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
+    subs::<Mode1LslImm>, unimplemented, subs::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x060
+    rsb::<Mode1LslImm>, unimplemented, rsb::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    rsb::<Mode1LslImm>, unimplemented, rsb::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x070
@@ -1392,9 +1504,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x080
-    add::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
+    add::<Mode1LslImm>, unimplemented, add::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    add::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
+    add::<Mode1LslImm>, unimplemented, add::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x090
@@ -1458,22 +1570,26 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x130
+    teq::<Mode1LslImm>, unimplemented, teq::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    teq::<Mode1LslImm>, unimplemented, teq::<Mode1LsrImm>, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x140
     mrs_spsr, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    unimplemented, unimplemented, unimplemented, strh::<Mode3Imm, Clear>,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x150
-    cmp::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    cmp::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    cmp::<Mode1LslImm>, unimplemented,
+    cmp::<Mode1LsrImm>, unimplemented,
+    unimplemented, unimplemented,
+    unimplemented, unimplemented,
+    cmp::<Mode1LslImm>, unimplemented,
+    cmp::<Mode1LsrImm>, ldrh::<Mode3Imm, Clear>,
+    unimplemented, unimplemented,
+    unimplemented, unimplemented,
 
     // 0x160
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1490,28 +1606,34 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x180
     orr::<Mode1LslImm>, orr::<Mode1LslReg>, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    orr::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
+    orr::<Mode1LslImm>, unimplemented, unimplemented, strh::<Mode3Reg, Set>,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x190
+    orrs::<Mode1LslImm>, orrs::<Mode1LslReg>, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, ldrh::<Mode3Reg, Set>,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    orrs::<Mode1LslImm>, unimplemented, unimplemented, ldrh::<Mode3Reg, Set>,
+    unimplemented, unimplemented, unimplemented, ldrsh::<Mode3Reg, Set>,
 
     // 0x1a0
     mov::<Mode1LslImm>, mov::<Mode1LslReg>,
     mov::<Mode1LsrImm>, mov::<Mode1LsrReg>,
-    mov::<Mode1AsrImm>, unimplemented, unimplemented, unimplemented,
-    mov::<Mode1LslImm>, unimplemented, mov::<Mode1LsrImm>, unimplemented,
-    mov::<Mode1AsrImm>, unimplemented, unimplemented, unimplemented,
+    mov::<Mode1AsrImm>, unimplemented,
+    mov::<Mode1Rrx>, unimplemented,
+    mov::<Mode1LslImm>, unimplemented,
+    mov::<Mode1LsrImm>, unimplemented,
+    mov::<Mode1AsrImm>, unimplemented,
+    unimplemented, unimplemented,
 
     // 0x1b0
     movs::<Mode1LslImm>, movs::<Mode1LslReg>,
     movs::<Mode1LsrImm>, movs::<Mode1LsrReg>,
-    unimplemented, unimplemented, movs::<Mode1Rrx>, unimplemented,
-    movs::<Mode1LslImm>, unimplemented, movs::<Mode1LsrImm>, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    movs::<Mode1AsrImm>, unimplemented,
+    movs::<Mode1Rrx>, unimplemented,
+    movs::<Mode1LslImm>, unimplemented,
+    movs::<Mode1LsrImm>, unimplemented,
+    movs::<Mode1AsrImm>, unimplemented,
+    unimplemented, unimplemented,
 
     // 0x1c0
     bic::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
@@ -1520,10 +1642,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x1d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, ldrh::<Mode3Imm, Set>,
-    unimplemented, ldrsb::<Mode3Imm, Set>, unimplemented, unimplemented,
+    unimplemented, unimplemented,
+    unimplemented, unimplemented,
+    unimplemented, unimplemented,
+    unimplemented, unimplemented,
+    unimplemented, unimplemented,
+    unimplemented, ldrh::<Mode3Imm, Set>,
+    unimplemented, ldrsb::<Mode3Imm, Set>,
+    unimplemented, ldrsh::<Mode3Imm, Set>,
 
     // 0x1e0
     mvn::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
@@ -1676,10 +1802,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x370
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    cmn::<Mode1Imm>, cmn::<Mode1Imm>, cmn::<Mode1Imm>, cmn::<Mode1Imm>,
+    cmn::<Mode1Imm>, cmn::<Mode1Imm>, cmn::<Mode1Imm>, cmn::<Mode1Imm>,
+    cmn::<Mode1Imm>, cmn::<Mode1Imm>, cmn::<Mode1Imm>, cmn::<Mode1Imm>,
+    cmn::<Mode1Imm>, cmn::<Mode1Imm>, cmn::<Mode1Imm>, cmn::<Mode1Imm>,
 
     // 0x380
     orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>,
