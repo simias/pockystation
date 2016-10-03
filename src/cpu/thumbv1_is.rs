@@ -94,22 +94,22 @@ impl Instruction {
         (self.0 & 0xff) as u32
     }
 
-    fn add(self, cpu: &mut Cpu, rd: RegisterIndex, a: u32, b: u32) {
+    fn adds(self, cpu: &mut Cpu, a: u32, b: u32) -> u32 {
         let val = a.wrapping_add(b);
 
         let a_neg = (a as i32) < 0;
         let b_neg = (b as i32) < 0;
         let v_neg = (val as i32) < 0;
 
-        cpu.set_reg(rd, val);
-
         cpu.set_n(v_neg);
         cpu.set_z(val == 0);
         cpu.set_c(val < a);
         cpu.set_v((a_neg == b_neg) & (a_neg ^ v_neg));
+
+        val
     }
 
-    fn sub(self, cpu: &mut Cpu, a: u32, b: u32) -> u32 {
+    fn subs(self, cpu: &mut Cpu, a: u32, b: u32) -> u32 {
         let val = a.wrapping_sub(b);
 
         let a_neg = (a as i32) < 0;
@@ -239,7 +239,9 @@ fn op06x_add_rr(instruction: Instruction, cpu: &mut Cpu) {
     let a = cpu.reg(rn);
     let b = cpu.reg(rm);
 
-    instruction.add(cpu, rd, a, b);
+    let val = instruction.adds(cpu, a, b);
+
+    cpu.set_reg(rd, val);
 }
 
 fn op06x_sub_rr(instruction: Instruction, cpu: &mut Cpu) {
@@ -250,7 +252,7 @@ fn op06x_sub_rr(instruction: Instruction, cpu: &mut Cpu) {
     let a = cpu.reg(rn);
     let b = cpu.reg(rm);
 
-    let val = instruction.sub(cpu, a, b);
+    let val = instruction.subs(cpu, a, b);
 
     cpu.set_reg(rd, val);
 }
@@ -262,7 +264,9 @@ fn op07x_add_i3(instruction: Instruction, cpu: &mut Cpu) {
 
     let a = cpu.reg(rn);
 
-    instruction.add(cpu, rd, a, b);
+    let val = instruction.adds(cpu, a, b);
+
+    cpu.set_reg(rd, val);
 }
 
 fn op07x_sub_i3(instruction: Instruction, cpu: &mut Cpu) {
@@ -272,7 +276,7 @@ fn op07x_sub_i3(instruction: Instruction, cpu: &mut Cpu) {
 
     let a = cpu.reg(rn);
 
-    let val = instruction.sub(cpu, a, b);
+    let val = instruction.subs(cpu, a, b);
 
     cpu.set_reg(rd, val);
 }
@@ -311,7 +315,9 @@ fn op0cx_add_i8(instruction: Instruction, cpu: &mut Cpu) {
 
     let a = cpu.reg(rd);
 
-    instruction.add(cpu, rd, a, b);
+    let val = instruction.adds(cpu, a, b);
+
+    cpu.set_reg(rd, val);
 }
 
 fn op0ex_sub_i8(instruction: Instruction, cpu: &mut Cpu) {
@@ -320,7 +326,7 @@ fn op0ex_sub_i8(instruction: Instruction, cpu: &mut Cpu) {
 
     let a = cpu.reg(rd);
 
-    let val = instruction.sub(cpu, a, b);
+    let val = instruction.subs(cpu, a, b);
 
     cpu.set_reg(rd, val);
 }
@@ -522,7 +528,7 @@ fn op109_neg(instruction: Instruction, cpu: &mut Cpu) {
 
     let b = cpu.reg(rm);
 
-    let val = instruction.sub(cpu, 0, b);
+    let val = instruction.subs(cpu, 0, b);
 
     cpu.set_reg(rd, val);
 }
@@ -534,7 +540,17 @@ fn op10a_cmp(instruction: Instruction, cpu: &mut Cpu) {
     let a = cpu.reg(rn);
     let b = cpu.reg(rm);
 
-    instruction.sub(cpu, a, b);
+    instruction.subs(cpu, a, b);
+}
+
+fn op10b_cmn(instruction: Instruction, cpu: &mut Cpu) {
+    let rn = instruction.reg_0();
+    let rm = instruction.reg_3();
+
+    let a = cpu.reg(rn);
+    let b = cpu.reg(rm);
+
+    instruction.adds(cpu, a, b);
 }
 
 fn op10c_orr(instruction: Instruction, cpu: &mut Cpu) {
@@ -1316,7 +1332,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
     // 0x100
     op100_and, op101_eor, op102_lsl_r, op103_lsr_r,
     op104_asr_r, op105_adc_rr, unimplemented, op107_ror,
-    op108_tst, op109_neg, op10a_cmp, unimplemented,
+    op108_tst, op109_neg, op10a_cmp, op10b_cmn,
     op10c_orr, op10d_mul, op10e_bic, op10f_mvn,
 
     // 0x110
