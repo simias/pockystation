@@ -888,6 +888,51 @@ impl Mode2Addressing for Mode2Imm {
     }
 }
 
+struct Mode2ImmPre;
+
+impl Mode2Addressing for Mode2ImmPre {
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag {
+        let rd     = instruction.rd();
+        let rn     = instruction.rn();
+        let offset = instruction.0 & 0xfff;
+
+        if rn.is_pc() {
+            // Unpredictable
+            panic!("PC pre-indexed");
+        }
+
+        if rd == rn {
+            // Unpredictable
+            panic!("Writeback indexing with Rd == Rn");
+        }
+
+        let base = cpu.reg(rn);
+
+        let addr =
+            if U::is_set() {
+                base.wrapping_add(offset)
+            } else {
+                base.wrapping_sub(offset)
+            };
+
+        // Pre index
+        cpu.set_reg(rn, addr);
+
+        addr
+    }
+
+    fn is_valid<U>(instruction: Instruction, load: bool, byte: bool) -> bool
+        where U: ModeFlag {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0101 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 22) & 1) == byte as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32
+    }
+}
+
 struct Mode2ImmPost;
 
 impl Mode2Addressing for Mode2ImmPost {
@@ -904,7 +949,7 @@ impl Mode2Addressing for Mode2ImmPost {
 
         if rd == rn {
             // Unpredictable
-            panic!("Writeback indexing with RD == RN");
+            panic!("Writeback indexing with Rd == Rn");
         }
 
         let base = cpu.reg(rn);
@@ -1072,6 +1117,104 @@ impl Mode3Addressing for Mode3Imm {
         let i = instruction.0;
 
         ((i >> 24) & 0xf) == 0b0001 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 21) & 3) == 2 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 7) & 1) == 1 &&
+            ((i >> 6) & 1) == signed as u32 &&
+            ((i >> 5) & 1) == (!byte) as u32 &&
+            ((i >> 4) & 1) == 1
+    }
+}
+
+struct Mode3ImmPre;
+
+impl Mode3Addressing for Mode3ImmPre {
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag {
+        let rn = instruction.rn();
+        let rd = instruction.rd();
+        let hi = (instruction.0 >> 8) & 0xf;
+        let lo = instruction.0 & 0xf;
+
+        if rd == rn {
+            // Unpredictable
+            panic!("Writeback indexing with Rd == Rn");
+        }
+
+        let offset = (hi << 4) | lo;
+
+        let base = cpu.reg(rn);
+
+        let addr =
+            if U::is_set() {
+                base.wrapping_add(offset)
+            } else {
+                base.wrapping_sub(offset)
+            };
+
+        cpu.set_reg(rn, addr);
+
+        addr
+    }
+
+    fn is_valid<U>(instruction: Instruction,
+                   load: bool,
+                   byte: bool,
+                   signed: bool) -> bool
+        where U: ModeFlag {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0001 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 21) & 3) == 3 &&
+            ((i >> 20) & 1) == load as u32 &&
+            ((i >> 7) & 1) == 1 &&
+            ((i >> 6) & 1) == signed as u32 &&
+            ((i >> 5) & 1) == (!byte) as u32 &&
+            ((i >> 4) & 1) == 1
+    }
+}
+
+struct Mode3ImmPost;
+
+impl Mode3Addressing for Mode3ImmPost {
+    fn address<U>(instruction: Instruction, cpu: &mut Cpu) -> u32
+        where U: ModeFlag {
+        let rn = instruction.rn();
+        let rd = instruction.rd();
+        let hi = (instruction.0 >> 8) & 0xf;
+        let lo = instruction.0 & 0xf;
+
+        if rd == rn {
+            // Unpredictable
+            panic!("Writeback indexing with Rd == Rn");
+        }
+
+        let offset = (hi << 4) | lo;
+
+        let base = cpu.reg(rn);
+
+        let wb =
+            if U::is_set() {
+                base.wrapping_add(offset)
+            } else {
+                base.wrapping_sub(offset)
+            };
+
+        cpu.set_reg(rn, wb);
+
+        base
+    }
+
+    fn is_valid<U>(instruction: Instruction,
+                   load: bool,
+                   byte: bool,
+                   signed: bool) -> bool
+        where U: ModeFlag {
+        let i = instruction.0;
+
+        ((i >> 24) & 0xf) == 0b0000 &&
             ((i >> 23) & 1) == U::is_set() as u32 &&
             ((i >> 21) & 3) == 2 &&
             ((i >> 20) & 1) == load as u32 &&
@@ -1536,7 +1679,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x0d0
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    unimplemented, unimplemented, unimplemented, ldrh::<Mode3ImmPost, Set>,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x0e0
@@ -1594,7 +1737,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x160
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    unimplemented, unimplemented, unimplemented, strh::<Mode3ImmPre, Clear>,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x170
@@ -1636,7 +1779,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented,
 
     // 0x1c0
-    bic::<Mode1LslImm>, unimplemented, unimplemented, unimplemented,
+    bic::<Mode1LslImm>, bic::<Mode1LslReg>, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     bic::<Mode1LslImm>, unimplemented, unimplemented, strh::<Mode3Imm, Set>,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -1660,7 +1803,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     // 0x1f0
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    unimplemented, unimplemented, unimplemented, ldrh::<Mode3ImmPre, Set>,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x200
@@ -2036,16 +2179,24 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     ldr::<Mode2Imm, Set>, ldr::<Mode2Imm, Set>,
 
     // 0x5a0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    str::<Mode2ImmPre, Set>, str::<Mode2ImmPre, Set>,
+    str::<Mode2ImmPre, Set>, str::<Mode2ImmPre, Set>,
+    str::<Mode2ImmPre, Set>, str::<Mode2ImmPre, Set>,
+    str::<Mode2ImmPre, Set>, str::<Mode2ImmPre, Set>,
+    str::<Mode2ImmPre, Set>, str::<Mode2ImmPre, Set>,
+    str::<Mode2ImmPre, Set>, str::<Mode2ImmPre, Set>,
+    str::<Mode2ImmPre, Set>, str::<Mode2ImmPre, Set>,
+    str::<Mode2ImmPre, Set>, str::<Mode2ImmPre, Set>,
 
     // 0x5b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldr::<Mode2ImmPre, Set>, ldr::<Mode2ImmPre, Set>,
+    ldr::<Mode2ImmPre, Set>, ldr::<Mode2ImmPre, Set>,
+    ldr::<Mode2ImmPre, Set>, ldr::<Mode2ImmPre, Set>,
+    ldr::<Mode2ImmPre, Set>, ldr::<Mode2ImmPre, Set>,
+    ldr::<Mode2ImmPre, Set>, ldr::<Mode2ImmPre, Set>,
+    ldr::<Mode2ImmPre, Set>, ldr::<Mode2ImmPre, Set>,
+    ldr::<Mode2ImmPre, Set>, ldr::<Mode2ImmPre, Set>,
+    ldr::<Mode2ImmPre, Set>, ldr::<Mode2ImmPre, Set>,
 
     // 0x5c0
     strb::<Mode2Imm, Set>, strb::<Mode2Imm, Set>,
