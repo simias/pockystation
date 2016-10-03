@@ -62,43 +62,6 @@ impl Instruction {
         self.0 & 0xffff
     }
 
-    /// Execute an STM instruction. Returns the address of the last
-    /// store + 4.
-    fn stm(self, cpu: &mut Cpu, start_addr: u32) -> u32 {
-        let rn   = self.rn();
-        let list = self.register_list();
-
-        let mut first = true;
-
-        let mut addr = start_addr;
-
-        for i in 0..15 {
-            if ((list >> i) & 1) != 0 {
-                let reg = RegisterIndex(i);
-
-                // If Rn is specified in the register_list and it's the
-                // first entry then the original value is stored,
-                // otherwise it's "unpredictable".
-                if !first && reg == rn {
-                    panic!("Unpredictable STM! {}", self);
-                }
-
-                let val = cpu.reg(reg);
-                cpu.store32(addr, val);
-
-                addr = addr.wrapping_add(4);
-                first = false;
-            }
-        }
-
-        if ((list >> 15) & 1) != 0 {
-            // Implementation defined
-            panic!("PC stored in STM");
-        }
-
-        addr
-    }
-
     /// Execute this instruction
     fn execute(self, cpu: &mut Cpu) {
         let n = cpu.n();
@@ -1004,6 +967,34 @@ fn ldrsb<M, U>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val as u32)
 }
 
+/// LDM/STM start address and WriteBack value
+fn mode4_start_wb<U, P>(base: u32, list: u32) -> (u32, u32)
+    where U: ModeFlag, P: ModeFlag {
+    let list_len = list.count_ones();
+
+    let len_bytes = list_len * 4;
+
+    if U::is_set() {
+        let start_addr =
+            if P::is_set() {
+                base + 4
+            } else {
+                base
+            };
+
+        (start_addr, base.wrapping_add(len_bytes))
+    } else {
+        let start_addr =
+            if P::is_set() {
+                base.wrapping_sub(len_bytes)
+            } else {
+                base.wrapping_sub(len_bytes) + 4
+            };
+
+        (start_addr, base.wrapping_sub(len_bytes))
+    }
+}
+
 fn ldm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
     where U: ModeFlag, P: ModeFlag, W: ModeFlag {
     let rn   = instruction.rn();
@@ -1027,44 +1018,24 @@ fn ldm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
         panic!("Unpredictable LDM");
     }
 
-    let list_len = list.count_ones();
     let base = cpu.reg(rn);
 
-    let mut addr =
-        if U::is_set() {
-            base
-        } else {
-            base - list_len * 4 + 4
-        };
+    let (mut addr, wb) = mode4_start_wb::<U, P>(base, list);
 
     for i in 0..16 {
         if ((list >> i) & 1) != 0 {
-            if P::is_set() {
-                if U::is_set() {
-                    addr = addr.wrapping_add(4);
-                } else {
-                    addr = addr.wrapping_sub(4);
-                }
-            }
-
             let reg = RegisterIndex(i);
 
             let val = cpu.load32(addr);
 
             cpu.set_reg_pc_mask(reg, val);
 
-            if P::is_clear() {
-                if U::is_set() {
-                    addr = addr.wrapping_add(4);
-                } else {
-                    addr = addr.wrapping_sub(4);
-                }
-            }
+            addr = addr.wrapping_add(4);
         }
     }
 
     if W::is_set() {
-        cpu.set_reg(rn, addr);
+        cpu.set_reg(rn, wb);
     }
 }
 
@@ -1107,28 +1078,14 @@ fn ldms<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
         debug_assert!(W::is_clear());
     }
 
-    let list_len = list.count_ones();
     let base = cpu.reg(rn);
 
-    let mut addr =
-        if U::is_set() {
-            base
-        } else {
-            base - list_len * 4 + 4
-        };
+    let (mut addr, wb) = mode4_start_wb::<U, P>(base, list);
 
     let mut pc = 0;
 
     for i in 0..16 {
         if ((list >> i) & 1) != 0 {
-            if P::is_set() {
-                if U::is_set() {
-                    addr = addr.wrapping_add(4);
-                } else {
-                    addr = addr.wrapping_sub(4);
-                }
-            }
-
             let reg = RegisterIndex(i);
 
             let val = cpu.load32(addr);
@@ -1148,24 +1105,75 @@ fn ldms<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
                 unimplemented!();
             }
 
-            if P::is_clear() {
-                if U::is_set() {
-                    addr = addr.wrapping_add(4);
-                } else {
-                    addr = addr.wrapping_sub(4);
-                }
-            }
+            addr = addr.wrapping_add(4);
         }
     }
 
     if W::is_set() {
-        cpu.set_reg(rn, addr);
+        cpu.set_reg(rn, wb);
     }
 
     if load_spsr {
         let spsr = cpu.spsr();
 
         cpu.set_pc_cpsr(pc, spsr);
+    }
+}
+
+fn stm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
+    where U: ModeFlag, P: ModeFlag, W: ModeFlag {
+    let rn   = instruction.rn();
+    let list = instruction.register_list();
+
+    let base_in_list = (list & (1 << rn.0)) != 0;
+
+    debug_assert!({
+        let i = instruction.0;
+
+        ((i >> 25) & 7) == 0b100 &&
+            ((i >> 24) & 1) == P::is_set() as u32 &&
+            ((i >> 23) & 1) == U::is_set() as u32 &&
+            ((i >> 22) & 1) == 0 &&
+            ((i >> 21) & 1) == W::is_set() as u32 &&
+            ((i >> 20) & 1) == 0 as u32
+    });
+
+    if list == 0 || rn.is_pc() ||
+        (W::is_set() && base_in_list) {
+        panic!("Unpredictable LDM");
+    }
+
+    let pc_in_list = (list & (1 << 15)) != 0;
+
+    if pc_in_list {
+        panic!("Implementation-defined STM");
+    }
+
+    let base = cpu.reg(rn);
+
+    let (mut addr, wb) = mode4_start_wb::<U, P>(base, list);
+
+    let mut first = true;
+
+    for i in 0..16 {
+        if ((list >> i) & 1) != 0 {
+            let reg = RegisterIndex(i);
+
+            if W::is_set() && reg == rn && !first {
+                panic!("Unpredictable STM");
+            }
+
+            let val = cpu.reg(reg);
+            cpu.store32(addr, val);
+
+            addr = addr.wrapping_add(4);
+
+            first = false;
+        }
+    }
+
+    if W::is_set() {
+        cpu.set_reg(rn, wb);
     }
 }
 
@@ -1221,50 +1229,6 @@ fn mrs_spsr(instruction: Instruction, cpu: &mut Cpu) {
     let val = cpu.spsr();
 
     cpu.set_reg(rd, val);
-}
-
-fn op88x_stm_u(instruction: Instruction, cpu: &mut Cpu) {
-    let rn = instruction.rn();
-
-    if rn.is_pc() {
-        panic!("PC-relative STM!");
-    }
-
-    let start_addr = cpu.reg(rn);
-
-    instruction.stm(cpu, start_addr);
-}
-
-fn op8ax_stm_uw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn = instruction.rn();
-
-    if rn.is_pc() {
-        panic!("PC-relative STM!");
-    }
-
-    let start_addr = cpu.reg(rn);
-
-    let end_addr = instruction.stm(cpu, start_addr);
-
-    cpu.set_reg(rn, end_addr);
-}
-
-fn op92x_stm_pw(instruction: Instruction, cpu: &mut Cpu) {
-    let rn   = instruction.rn();
-    let list = instruction.register_list();
-
-    if rn.is_pc() {
-        // Using PC as base if we want writeback is unpredictable
-        panic!("PC-relative STM!");
-    }
-
-    let num_regs = list.count_ones();
-
-    let start_addr = cpu.reg(rn).wrapping_sub(4 * num_regs);
-
-    instruction.stm(cpu, start_addr);
-
-    cpu.set_reg(rn, start_addr);
 }
 
 fn b(instruction: Instruction, cpu: &mut Cpu) {
@@ -2143,10 +2107,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x880
-    op88x_stm_u, op88x_stm_u, op88x_stm_u, op88x_stm_u,
-    op88x_stm_u, op88x_stm_u, op88x_stm_u, op88x_stm_u,
-    op88x_stm_u, op88x_stm_u, op88x_stm_u, op88x_stm_u,
-    op88x_stm_u, op88x_stm_u, op88x_stm_u, op88x_stm_u,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
+    stm::<Set, Clear, Clear>, stm::<Set, Clear, Clear>,
 
     // 0x890
     ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
@@ -2159,10 +2127,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     ldm::<Set, Clear, Clear>, ldm::<Set, Clear, Clear>,
 
     // 0x8a0
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
-    op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw, op8ax_stm_uw,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
+    stm::<Set, Clear, Set>, stm::<Set, Clear, Set>,
 
     // 0x8b0
     ldm::<Set, Clear, Set>, ldm::<Set, Clear, Set>,
@@ -2215,10 +2187,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x920
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
-    op92x_stm_pw, op92x_stm_pw, op92x_stm_pw, op92x_stm_pw,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
+    stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
 
     // 0x930
     unimplemented, unimplemented, unimplemented, unimplemented,
