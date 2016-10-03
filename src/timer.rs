@@ -76,9 +76,14 @@ impl Timer {
         }
 
         match offset {
+            4 => self.counter() as u32,
             8 => self.mode() as u32,
             _ => panic!("Unhandled timer register {:x}", offset),
         }
+    }
+
+    fn counter(&self) -> u16 {
+        (self.counter >> self.divider_shift()) as u16
     }
 
     fn divider_shift(&self) -> u8 {
