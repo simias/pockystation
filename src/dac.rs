@@ -54,7 +54,9 @@ impl Dac {
 
 
     pub fn store<A: Addressable>(&mut self, offset: u32, val: u32) {
-        if A::size() != 4 {
+        if A::size() == 1 {
+            // XXX Brightis uses 16bit dac stores, test if it behaves
+            // exactly like 32bit
             panic!("Unhandled {}bit DAC store", A::size() * 8);
         }
 

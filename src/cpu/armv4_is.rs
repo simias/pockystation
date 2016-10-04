@@ -393,26 +393,43 @@ impl Mode1Addressing for Mode1AsrReg {
     }
 }
 
-/// Rotate right with extend
-struct Mode1Rrx;
+/// Rotate right by immediate/ Rotate right with extend
+struct Mode1RorImm;
 
-impl Mode1Addressing for Mode1Rrx {
+impl Mode1Addressing for Mode1RorImm {
     fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
-        let rm  = instruction.rm();
-        let val = cpu.reg(rm);
-        let c   = cpu.c() as u32;
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
 
-        (c << 31) | (val >> 1)
+        let val = cpu.reg(rm);
+
+        if shift == 0 {
+            // Special case: this is rotate right with extend
+            let c = cpu.c() as u32;
+
+            (c << 31) | (val >> 1)
+        } else {
+            val.rotate_right(shift)
+        }
     }
 
     fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool) {
-        let rm  = instruction.rm();
+        let shift = (instruction.0 >> 7) & 0x1f;
+        let rm    = instruction.rm();
+
         let val = cpu.reg(rm);
-        let c   = cpu.c() as u32;
 
-        let r = (c << 31) | (val >> 1);
+        if shift == 0 {
+            // Special case: this is rotate right with extend
+            let c = cpu.c() as u32;
 
-        (r, (r & 1) != 0)
+            let r = (c << 31) | (val >> 1);
+
+            (r, (r & 1) != 0)
+        } else {
+            (val.rotate_right(shift),
+             ((val >> (shift - 1)) & 1) != 0)
+        }
     }
 
     fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
@@ -421,7 +438,49 @@ impl Mode1Addressing for Mode1Rrx {
         ((i >> 25) & 7) == 0 &&
             ((i >> 21) & 0xf) == opcode &&
             ((i >> 20) & 1) == s as u32 &&
-            ((i >> 4) & 0xff) == 0b00000110
+            ((i >> 4) & 7) == 0b110
+    }
+}
+
+struct Mode1RorReg;
+
+impl Mode1Addressing for Mode1RorReg {
+    fn value(instruction: Instruction, cpu: &Cpu) -> u32 {
+        let rm    = instruction.rm();
+        let rs    = instruction.rs();
+
+        let val   = cpu.reg(rm);
+        let shift = cpu.reg(rs) & 0x1f;
+
+        val.rotate_right(shift)
+    }
+
+    fn value_carry(instruction: Instruction, cpu: &Cpu) -> (u32, bool) {
+        let rm    = instruction.rm();
+        let rs    = instruction.rs();
+
+        let val   = cpu.reg(rm);
+        let shift = cpu.reg(rs) & 0xff;
+
+        if shift == 0 {
+            (val, cpu.c())
+        } else if (shift & 0x1f) == 0 {
+            (val, (val as i32) < 0)
+        } else {
+            let shift = shift & 0x1f;
+
+            (val.rotate_right(shift),
+             ((val >> (shift - 1)) & 1) != 0)
+        }
+    }
+
+    fn is_valid(instruction: Instruction, opcode: u32, s: bool) -> bool {
+        let i = instruction.0;
+
+        ((i >> 20) & 1) == s as u32 &&
+            ((i >> 21) & 0xf) == opcode &&
+            ((i >> 25) & 7) == 0 &&
+            ((i >> 4) & 0xf) == 0b0111
     }
 }
 
@@ -808,6 +867,29 @@ fn bic<M>(instruction: Instruction, cpu: &mut Cpu)
     let val = a & !b;
 
     cpu.set_reg(rd, val);
+}
+
+fn bics<M>(instruction: Instruction, cpu: &mut Cpu)
+    where M: Mode1Addressing {
+    let rd     = instruction.rd();
+    let rn     = instruction.rn();
+    let (b, c) = M::value_carry(instruction, cpu);
+
+    debug_assert!(M::is_valid(instruction, 14, true));
+
+    if rd.is_pc() {
+        panic!("*S instruction with PC target");
+    }
+
+    let a = cpu.reg(rn);
+
+    let val = a & !b;
+
+    cpu.set_reg(rd, val);
+
+    cpu.set_n((val as i32) < 0);
+    cpu.set_z(val == 0);
+    cpu.set_c(c);
 }
 
 fn mvn<M>(instruction: Instruction, cpu: &mut Cpu)
@@ -1780,7 +1862,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     cmp::<Mode1LslImm>, unimplemented,
     cmp::<Mode1LsrImm>, unimplemented,
     cmp::<Mode1AsrImm>, unimplemented,
-    cmp::<Mode1Rrx>, unimplemented,
+    cmp::<Mode1RorImm>, unimplemented,
     cmp::<Mode1LslImm>, unimplemented,
     cmp::<Mode1LsrImm>, ldrh::<Mode3Imm, Clear>,
     cmp::<Mode1AsrImm>, unimplemented,
@@ -1799,10 +1881,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x180
-    orr::<Mode1LslImm>, orr::<Mode1LslReg>, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    orr::<Mode1LslImm>, unimplemented, unimplemented, strh::<Mode3Reg, Set>,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    orr::<Mode1LslImm>, orr::<Mode1LslReg>,
+    orr::<Mode1LsrImm>, orr::<Mode1LsrReg>,
+    orr::<Mode1AsrImm>, orr::<Mode1AsrReg>,
+    orr::<Mode1RorImm>, orr::<Mode1RorReg>,
+    orr::<Mode1LslImm>, unimplemented,
+    orr::<Mode1LsrImm>, strh::<Mode3Reg, Set>,
+    orr::<Mode1AsrImm>, unimplemented,
+    unimplemented, unimplemented,
 
     // 0x190
     orrs::<Mode1LslImm>, orrs::<Mode1LslReg>, unimplemented, unimplemented,
@@ -1814,7 +1900,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     mov::<Mode1LslImm>, mov::<Mode1LslReg>,
     mov::<Mode1LsrImm>, mov::<Mode1LsrReg>,
     mov::<Mode1AsrImm>, mov::<Mode1AsrReg>,
-    mov::<Mode1Rrx>, unimplemented,
+    mov::<Mode1RorImm>, mov::<Mode1RorReg>,
     mov::<Mode1LslImm>, unimplemented,
     mov::<Mode1LsrImm>, unimplemented,
     mov::<Mode1AsrImm>, unimplemented,
@@ -1824,24 +1910,28 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     movs::<Mode1LslImm>, movs::<Mode1LslReg>,
     movs::<Mode1LsrImm>, movs::<Mode1LsrReg>,
     movs::<Mode1AsrImm>, unimplemented,
-    movs::<Mode1Rrx>, unimplemented,
+    movs::<Mode1RorImm>, unimplemented,
     movs::<Mode1LslImm>, unimplemented,
     movs::<Mode1LsrImm>, unimplemented,
     movs::<Mode1AsrImm>, unimplemented,
     unimplemented, unimplemented,
 
     // 0x1c0
-    bic::<Mode1LslImm>, bic::<Mode1LslReg>, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    bic::<Mode1LslImm>, unimplemented, unimplemented, strh::<Mode3Imm, Set>,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    bic::<Mode1LslImm>, bic::<Mode1LslReg>,
+    bic::<Mode1LsrImm>, bic::<Mode1LsrReg>,
+    bic::<Mode1AsrImm>, bic::<Mode1AsrReg>,
+    bic::<Mode1RorImm>, bic::<Mode1RorReg>,
+    bic::<Mode1LslImm>, unimplemented,
+    bic::<Mode1LsrImm>, strh::<Mode3Imm, Set>,
+    bic::<Mode1AsrImm>, unimplemented,
+    unimplemented, unimplemented,
 
     // 0x1d0
+    bics::<Mode1LslImm>, bics::<Mode1LslReg>,
     unimplemented, unimplemented,
     unimplemented, unimplemented,
     unimplemented, unimplemented,
-    unimplemented, unimplemented,
-    unimplemented, unimplemented,
+    bics::<Mode1LslImm>, unimplemented,
     unimplemented, ldrh::<Mode3Imm, Set>,
     unimplemented, ldrsb::<Mode3Imm, Set>,
     unimplemented, ldrsh::<Mode3Imm, Set>,
@@ -2009,10 +2099,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>, orr::<Mode1Imm>,
 
     // 0x390
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    orrs::<Mode1Imm>, orrs::<Mode1Imm>, orrs::<Mode1Imm>, orrs::<Mode1Imm>,
+    orrs::<Mode1Imm>, orrs::<Mode1Imm>, orrs::<Mode1Imm>, orrs::<Mode1Imm>,
+    orrs::<Mode1Imm>, orrs::<Mode1Imm>, orrs::<Mode1Imm>, orrs::<Mode1Imm>,
+    orrs::<Mode1Imm>, orrs::<Mode1Imm>, orrs::<Mode1Imm>, orrs::<Mode1Imm>,
 
     // 0x3a0
     mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>, mov::<Mode1Imm>,
@@ -2033,10 +2123,10 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>, bic::<Mode1Imm>,
 
     // 0x3d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    bics::<Mode1Imm>, bics::<Mode1Imm>, bics::<Mode1Imm>, bics::<Mode1Imm>,
+    bics::<Mode1Imm>, bics::<Mode1Imm>, bics::<Mode1Imm>, bics::<Mode1Imm>,
+    bics::<Mode1Imm>, bics::<Mode1Imm>, bics::<Mode1Imm>, bics::<Mode1Imm>,
+    bics::<Mode1Imm>, bics::<Mode1Imm>, bics::<Mode1Imm>, bics::<Mode1Imm>,
 
     // 0x3e0
     mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>, mvn::<Mode1Imm>,
@@ -2141,10 +2231,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     strb::<Mode2ImmPost, Set>, strb::<Mode2ImmPost, Set>,
 
     // 0x4d0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldrb::<Mode2ImmPost, Set>, ldrb::<Mode2ImmPost, Set>,
+    ldrb::<Mode2ImmPost, Set>, ldrb::<Mode2ImmPost, Set>,
+    ldrb::<Mode2ImmPost, Set>, ldrb::<Mode2ImmPost, Set>,
+    ldrb::<Mode2ImmPost, Set>, ldrb::<Mode2ImmPost, Set>,
+    ldrb::<Mode2ImmPost, Set>, ldrb::<Mode2ImmPost, Set>,
+    ldrb::<Mode2ImmPost, Set>, ldrb::<Mode2ImmPost, Set>,
+    ldrb::<Mode2ImmPost, Set>, ldrb::<Mode2ImmPost, Set>,
+    ldrb::<Mode2ImmPost, Set>, ldrb::<Mode2ImmPost, Set>,
 
     // 0x4e0
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2455,15 +2549,15 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x7c0
+    strb::<Mode2LslReg, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    strb::<Mode2LslReg, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x7d0
+    ldrb::<Mode2LslReg, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldrb::<Mode2LslReg, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x7e0
