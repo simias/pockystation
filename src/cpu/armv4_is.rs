@@ -1816,10 +1816,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x020
-    eor::<Mode1LslImm>, unimplemented, eor::<Mode1LsrImm>, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    eor::<Mode1LslImm>, mla::<Clear>, eor::<Mode1LsrImm>, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    eor::<Mode1LslImm>, eor::<Mode1LslReg>,
+    eor::<Mode1LsrImm>, eor::<Mode1LsrReg>,
+    eor::<Mode1AsrImm>, eor::<Mode1AsrReg>,
+    eor::<Mode1RorImm>, eor::<Mode1RorReg>,
+    eor::<Mode1LslImm>, mla::<Clear>,
+    eor::<Mode1LsrImm>, unimplemented,
+    eor::<Mode1AsrImm>, unimplemented,
+    unimplemented, unimplemented,
 
     // 0x030
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2252,10 +2256,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x440
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    strb::<Mode2ImmPost, Clear>, strb::<Mode2ImmPost, Clear>,
+    strb::<Mode2ImmPost, Clear>, strb::<Mode2ImmPost, Clear>,
+    strb::<Mode2ImmPost, Clear>, strb::<Mode2ImmPost, Clear>,
+    strb::<Mode2ImmPost, Clear>, strb::<Mode2ImmPost, Clear>,
+    strb::<Mode2ImmPost, Clear>, strb::<Mode2ImmPost, Clear>,
+    strb::<Mode2ImmPost, Clear>, strb::<Mode2ImmPost, Clear>,
+    strb::<Mode2ImmPost, Clear>, strb::<Mode2ImmPost, Clear>,
+    strb::<Mode2ImmPost, Clear>, strb::<Mode2ImmPost, Clear>,
 
     // 0x450
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2360,28 +2368,44 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     ldr::<Mode2Imm, Clear>, ldr::<Mode2Imm, Clear>,
 
     // 0x520
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    str::<Mode2ImmPre, Clear>, str::<Mode2ImmPre, Clear>,
+    str::<Mode2ImmPre, Clear>, str::<Mode2ImmPre, Clear>,
+    str::<Mode2ImmPre, Clear>, str::<Mode2ImmPre, Clear>,
+    str::<Mode2ImmPre, Clear>, str::<Mode2ImmPre, Clear>,
+    str::<Mode2ImmPre, Clear>, str::<Mode2ImmPre, Clear>,
+    str::<Mode2ImmPre, Clear>, str::<Mode2ImmPre, Clear>,
+    str::<Mode2ImmPre, Clear>, str::<Mode2ImmPre, Clear>,
+    str::<Mode2ImmPre, Clear>, str::<Mode2ImmPre, Clear>,
 
     // 0x530
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldr::<Mode2ImmPre, Clear>, ldr::<Mode2ImmPre, Clear>,
+    ldr::<Mode2ImmPre, Clear>, ldr::<Mode2ImmPre, Clear>,
+    ldr::<Mode2ImmPre, Clear>, ldr::<Mode2ImmPre, Clear>,
+    ldr::<Mode2ImmPre, Clear>, ldr::<Mode2ImmPre, Clear>,
+    ldr::<Mode2ImmPre, Clear>, ldr::<Mode2ImmPre, Clear>,
+    ldr::<Mode2ImmPre, Clear>, ldr::<Mode2ImmPre, Clear>,
+    ldr::<Mode2ImmPre, Clear>, ldr::<Mode2ImmPre, Clear>,
+    ldr::<Mode2ImmPre, Clear>, ldr::<Mode2ImmPre, Clear>,
 
     // 0x540
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    strb::<Mode2Imm, Clear>, strb::<Mode2Imm, Clear>,
+    strb::<Mode2Imm, Clear>, strb::<Mode2Imm, Clear>,
+    strb::<Mode2Imm, Clear>, strb::<Mode2Imm, Clear>,
+    strb::<Mode2Imm, Clear>, strb::<Mode2Imm, Clear>,
+    strb::<Mode2Imm, Clear>, strb::<Mode2Imm, Clear>,
+    strb::<Mode2Imm, Clear>, strb::<Mode2Imm, Clear>,
+    strb::<Mode2Imm, Clear>, strb::<Mode2Imm, Clear>,
+    strb::<Mode2Imm, Clear>, strb::<Mode2Imm, Clear>,
 
     // 0x550
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldrb::<Mode2Imm, Clear>, ldrb::<Mode2Imm, Clear>,
+    ldrb::<Mode2Imm, Clear>, ldrb::<Mode2Imm, Clear>,
+    ldrb::<Mode2Imm, Clear>, ldrb::<Mode2Imm, Clear>,
+    ldrb::<Mode2Imm, Clear>, ldrb::<Mode2Imm, Clear>,
+    ldrb::<Mode2Imm, Clear>, ldrb::<Mode2Imm, Clear>,
+    ldrb::<Mode2Imm, Clear>, ldrb::<Mode2Imm, Clear>,
+    ldrb::<Mode2Imm, Clear>, ldrb::<Mode2Imm, Clear>,
+    ldrb::<Mode2Imm, Clear>, ldrb::<Mode2Imm, Clear>,
 
     // 0x560
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2782,10 +2806,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x910
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldm::<Clear, Set, Clear>, ldm::<Clear, Set, Clear>,
+    ldm::<Clear, Set, Clear>, ldm::<Clear, Set, Clear>,
+    ldm::<Clear, Set, Clear>, ldm::<Clear, Set, Clear>,
+    ldm::<Clear, Set, Clear>, ldm::<Clear, Set, Clear>,
+    ldm::<Clear, Set, Clear>, ldm::<Clear, Set, Clear>,
+    ldm::<Clear, Set, Clear>, ldm::<Clear, Set, Clear>,
+    ldm::<Clear, Set, Clear>, ldm::<Clear, Set, Clear>,
+    ldm::<Clear, Set, Clear>, ldm::<Clear, Set, Clear>,
 
     // 0x920
     stm::<Clear, Set, Set>, stm::<Clear, Set, Set>,
