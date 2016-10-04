@@ -684,6 +684,22 @@ fn op14x_str_rr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.store32(addr, val);
 }
 
+fn op14x_strh_rr(instruction: Instruction, cpu: &mut Cpu) {
+    let rd = instruction.reg_0();
+    let rn = instruction.reg_3();
+    let rm = instruction.reg_6();
+
+    let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
+
+    if (addr & 1) != 0 {
+        panic!("Unpredictable STRH");
+    }
+
+    let val = cpu.reg(rd);
+
+    cpu.store16(addr, val);
+}
+
 fn op15x_strb_rr(instruction: Instruction, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
@@ -1366,8 +1382,8 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
     // 0x140
     op14x_str_rr, op14x_str_rr, op14x_str_rr, op14x_str_rr,
     op14x_str_rr, op14x_str_rr, op14x_str_rr, op14x_str_rr,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    op14x_strh_rr, op14x_strh_rr, op14x_strh_rr, op14x_strh_rr,
+    op14x_strh_rr, op14x_strh_rr, op14x_strh_rr, op14x_strh_rr,
 
     // 0x150
     op15x_strb_rr, op15x_strb_rr, op15x_strb_rr, op15x_strb_rr,
