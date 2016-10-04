@@ -41,17 +41,17 @@ impl Instruction {
         RegisterIndex(r as u32)
     }
 
-    fn rm_full(self) -> RegisterIndex {
-        let r = (self.0 >> 3) & 0xf;
-
-        RegisterIndex(r as u32)
-    }
-
-    fn rd_full(self) -> RegisterIndex {
+    fn reg_0_full(self) -> RegisterIndex {
         let lo = (self.0 & 0x7) as u32;
         let hi = ((self.0 >> 7) & 1) as u32;
 
         RegisterIndex((hi << 3) | lo)
+    }
+
+    fn reg_3_full(self) -> RegisterIndex {
+        let r = (self.0 >> 3) & 0xf;
+
+        RegisterIndex(r as u32)
     }
 
     fn imm8(self) -> u32 {
@@ -605,8 +605,8 @@ fn op10f_mvn(instruction: Instruction, cpu: &mut Cpu) {
 }
 
 fn op111_add_hi(instruction: Instruction, cpu: &mut Cpu) {
-    let rm = instruction.rm_full();
-    let rd = instruction.rd_full();
+    let rm = instruction.reg_3_full();
+    let rd = instruction.reg_0_full();
 
     let a = cpu.reg(rd);
     let b = cpu.reg(rm);
@@ -616,8 +616,18 @@ fn op111_add_hi(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
+fn op115_cmp_hi(instruction: Instruction, cpu: &mut Cpu) {
+    let rn = instruction.reg_0_full();
+    let rm = instruction.reg_3_full();
+
+    let a = cpu.reg(rn);
+    let b = cpu.reg(rm);
+
+    instruction.subs(cpu, a, b);
+}
+
 fn op11c_bx(instruction: Instruction, cpu: &mut Cpu) {
-    let rm = instruction.rm_full();
+    let rm = instruction.reg_3_full();
 
     if (instruction.0 & 7) != 0 {
         // Should be 0
@@ -633,8 +643,8 @@ fn op11c_bx(instruction: Instruction, cpu: &mut Cpu) {
 
 /// Also known as MOV(3)
 fn op118_cpy(instruction: Instruction, cpu: &mut Cpu) {
-    let rm = instruction.rm_full();
-    let rd = instruction.rd_full();
+    let rm = instruction.reg_3_full();
+    let rd = instruction.reg_0_full();
 
     let val = cpu.reg(rm);
 
@@ -1337,7 +1347,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
 
     // 0x110
     unimplemented, op111_add_hi, op111_add_hi, op111_add_hi,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    unimplemented, op115_cmp_hi, unimplemented, unimplemented,
     op118_cpy, op118_cpy, op118_cpy, op118_cpy,
     op11c_bx, op11c_bx, unimplemented, unimplemented,
 
