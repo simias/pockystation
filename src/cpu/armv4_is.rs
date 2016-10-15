@@ -1918,10 +1918,14 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x110
-    tst::<Mode1LslImm>, unimplemented, tst::<Mode1LsrImm>, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    tst::<Mode1LslImm>, unimplemented, tst::<Mode1LsrImm>, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    tst::<Mode1LslImm>, tst::<Mode1LslReg>,
+    tst::<Mode1LsrImm>, tst::<Mode1LsrReg>,
+    tst::<Mode1AsrImm>, tst::<Mode1AsrReg>,
+    tst::<Mode1RorImm>, tst::<Mode1RorReg>,
+    tst::<Mode1LslImm>, unimplemented,
+    tst::<Mode1LsrImm>, unimplemented,
+    tst::<Mode1AsrImm>, unimplemented,
+    tst::<Mode1RorImm>, unimplemented,
 
     // 0x120
     msr_cpsr, bx, unimplemented, unimplemented,
@@ -1971,7 +1975,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     orr::<Mode1LslImm>, unimplemented,
     orr::<Mode1LsrImm>, strh::<Mode3Reg, Set>,
     orr::<Mode1AsrImm>, unimplemented,
-    unimplemented, unimplemented,
+    orr::<Mode1RorImm>, unimplemented,
 
     // 0x190
     orrs::<Mode1LslImm>, orrs::<Mode1LslReg>,
@@ -2480,16 +2484,24 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     ldrb::<Mode2Imm, Set>, ldrb::<Mode2Imm, Set>,
 
     // 0x5e0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    strb::<Mode2ImmPre, Set>, strb::<Mode2ImmPre, Set>,
+    strb::<Mode2ImmPre, Set>, strb::<Mode2ImmPre, Set>,
+    strb::<Mode2ImmPre, Set>, strb::<Mode2ImmPre, Set>,
+    strb::<Mode2ImmPre, Set>, strb::<Mode2ImmPre, Set>,
+    strb::<Mode2ImmPre, Set>, strb::<Mode2ImmPre, Set>,
+    strb::<Mode2ImmPre, Set>, strb::<Mode2ImmPre, Set>,
+    strb::<Mode2ImmPre, Set>, strb::<Mode2ImmPre, Set>,
+    strb::<Mode2ImmPre, Set>, strb::<Mode2ImmPre, Set>,
 
     // 0x5f0
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldrb::<Mode2ImmPre, Set>, ldrb::<Mode2ImmPre, Set>,
+    ldrb::<Mode2ImmPre, Set>, ldrb::<Mode2ImmPre, Set>,
+    ldrb::<Mode2ImmPre, Set>, ldrb::<Mode2ImmPre, Set>,
+    ldrb::<Mode2ImmPre, Set>, ldrb::<Mode2ImmPre, Set>,
+    ldrb::<Mode2ImmPre, Set>, ldrb::<Mode2ImmPre, Set>,
+    ldrb::<Mode2ImmPre, Set>, ldrb::<Mode2ImmPre, Set>,
+    ldrb::<Mode2ImmPre, Set>, ldrb::<Mode2ImmPre, Set>,
+    ldrb::<Mode2ImmPre, Set>, ldrb::<Mode2ImmPre, Set>,
 
     // 0x600
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2654,7 +2666,7 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x7b0
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldr::<Mode2LslRegPre, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
@@ -2678,9 +2690,9 @@ static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x7f0
+    ldrb::<Mode2LslRegPre, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
-    unimplemented, unimplemented, unimplemented, unimplemented,
+    ldrb::<Mode2LslRegPre, Set>, unimplemented, unimplemented, unimplemented,
     unimplemented, unimplemented, unimplemented, unimplemented,
 
     // 0x800
