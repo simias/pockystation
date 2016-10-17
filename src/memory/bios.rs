@@ -40,6 +40,11 @@ impl Bios {
     pub fn load<A: Addressable>(&self, offset: u32) -> u32 {
         let offset = offset as usize;
 
+        // BIOS only supports 16 and 32bit acccess
+        if A::size() == 1 {
+            panic!("Unsupported 8bit BIOS read");
+        }
+
         let mut r = 0;
 
         for i in 0..A::size() as usize {

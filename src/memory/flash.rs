@@ -109,6 +109,11 @@ impl Flash {
     pub fn load_raw<A: Addressable>(&self, offset: u32) -> u32 {
         let offset = offset as usize;
 
+        // Flash only supports 16 and 32bit acccess
+        if A::size() == 1 {
+            panic!("Unsupported 8bit FLASH read");
+        }
+
         let mut r = 0;
 
         for i in 0..A::size() as usize {
