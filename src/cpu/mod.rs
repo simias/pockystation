@@ -1,7 +1,9 @@
 use std::fmt;
 use std::mem::swap;
+use std::panic;
 
-use memory::{Interconnect, Word, HalfWord, Byte};
+use memory::{Interconnect, Addressable, Word, HalfWord, Byte};
+use debugger::Debugger;
 
 mod armv4_is;
 mod thumbv1_is;
@@ -45,6 +47,9 @@ pub struct Cpu {
     spsr: u32,
     /// Interconnect to the memory
     inter: Interconnect,
+    /// If `true` we trigger the debugger when a `bkpt` instruction is
+    /// encountered
+    debug_on_bkpt: bool,
 }
 
 impl Cpu {
@@ -74,11 +79,21 @@ impl Cpu {
                 fiq_en: false,
                 spsr: 0,
                 inter: inter,
+                debug_on_bkpt: false,
             };
 
         cpu.reset();
 
         cpu
+    }
+
+    pub fn set_debug_on_bkpt(&mut self, enabled: bool) {
+        self.debug_on_bkpt = enabled
+    }
+
+    /// Return R0 to R14 and the PC
+    pub fn registers(&self) -> &[u32; 16] {
+        &self.registers
     }
 
     pub fn reset(&mut self) {
@@ -96,15 +111,19 @@ impl Cpu {
     }
 
     /// Run CPU for `master_ticks` master clock periods
-    pub fn run_ticks(&mut self, master_ticks: u32) {
+    pub fn run_ticks<D: Debugger>(&mut self,
+                                  debugger: &mut D,
+                                  master_ticks: u32) {
+
         while self.inter.frame_ticks() < master_ticks {
-            self.run_next_instruction();
+            self.run_next_instruction(debugger);
         }
 
         self.inter.set_frame_ticks(0);
     }
 
-    pub fn run_next_instruction(&mut self) {
+    pub fn run_next_instruction<D>(&mut self, debugger: &mut D)
+        where D: Debugger {
         // Assume each instruction takes exactly one CPU cycle for
         // now, a gross oversimplification...
         self.inter.tick(1);
@@ -122,6 +141,8 @@ impl Cpu {
         let pc = self.next_pc;
 
         self.next_pc = self.registers[15];
+
+        debugger.pc_change(self);
 
         if self.thumb {
             // In Thumb mode the PC register (R15) always points to
@@ -219,7 +240,19 @@ impl Cpu {
         }
     }
 
-    fn set_pc(&mut self, pc: u32) {
+    /// Return the PC to the currently executed instruction
+    pub fn current_pc(&self) -> u32 {
+        let off =
+            if self.thumb {
+                2
+            } else {
+                4
+            };
+
+        self.next_pc.wrapping_sub(off)
+    }
+
+    pub fn set_pc(&mut self, pc: u32) {
         self.next_pc = pc;
 
         let r15_offset =
@@ -229,7 +262,7 @@ impl Cpu {
                 4
             };
 
-        self.registers[15] = pc + r15_offset;
+        self.registers[15] = pc.wrapping_add(r15_offset);
     }
 
     /// Change the value of the PC update the thumb state. Since the
@@ -355,7 +388,7 @@ impl Cpu {
     }
 
     /// Build the value of the 32bit CPSR register
-    fn cpsr(&self) -> u32 {
+    pub fn cpsr(&self) -> u32 {
         let mut r = 0u32;
 
         r |= self.mode as u32;
@@ -468,6 +501,26 @@ impl Cpu {
             self.c = (flags & 2) != 0;
             self.z = (flags & 4) != 0;
             self.n = (flags & 8) != 0;
+        }
+    }
+
+    /// Load a memory location without side-effect, useful for
+    /// debugging.
+    pub fn examine<A: Addressable>(&self, addr: u32) -> u32 {
+        // Catch panics (probably caused by unimplemented memory
+        // regions). We don't want to crash the code if the debugger
+        // reads from a weird address.
+        //
+        // XXX Remove that when the entire address space is
+        // implemented.
+        let r = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+            self.inter.load::<A>(addr)
+        }));
+
+        match r {
+            Ok(v) => v,
+            // Return dummy value
+            Err(_) => 0xbadbadbd,
         }
     }
 

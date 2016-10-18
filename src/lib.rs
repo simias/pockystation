@@ -7,6 +7,7 @@ pub mod lcd;
 pub mod interrupt;
 pub mod dac;
 pub mod rtc;
+pub mod debugger;
 mod irda;
 mod timer;
 
