@@ -2,12 +2,16 @@
 
 use std::fmt;
 
+use memory::{Word, HalfWord, Byte};
+use debugger::Debugger;
+
 use super::{Cpu, RegisterIndex};
 
-pub fn execute(cpu: &mut Cpu, instruction: u32) {
+pub fn execute<D>(cpu: &mut Cpu, debugger: &mut D, instruction: u32)
+    where D: Debugger {
     let instruction = Instruction(instruction);
 
-    instruction.execute(cpu);
+    instruction.execute(debugger, cpu);
 }
 
 /// Wrapper around a 32bit instruction word
@@ -63,7 +67,9 @@ impl Instruction {
     }
 
     /// Execute this instruction
-    fn execute(self, cpu: &mut Cpu) {
+    fn execute<D>(self, debugger: &mut D, cpu: &mut Cpu)
+        where D: Debugger {
+
         let n = cpu.n();
         let z = cpu.z();
         let c = cpu.c();
@@ -110,14 +116,15 @@ impl Instruction {
             };
 
         if cond_true {
-            self.decode_and_execute(cpu);
+            self.decode_and_execute(debugger, cpu);
         }
     }
 
-    fn decode_and_execute(self, cpu: &mut Cpu) {
+    fn decode_and_execute<D>(self, debugger: &mut D, cpu: &mut Cpu)
+        where D: Debugger {
         let handler = OPCODE_LUT[self.opcode() as usize];
 
-        handler(self, cpu);
+        handler(self, debugger, cpu);
     }
 }
 
@@ -484,14 +491,14 @@ impl Mode1Addressing for Mode1RorReg {
     }
 }
 
-fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
+fn unimplemented(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     panic!("Unimplemented instruction {} ({:03x})\n{:?}",
            instruction,
            instruction.opcode(),
            cpu);
 }
 
-fn and<M>(instruction: Instruction, cpu: &mut Cpu)
+fn and<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
@@ -506,7 +513,7 @@ fn and<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val);
 }
 
-fn ands<M>(instruction: Instruction, cpu: &mut Cpu)
+fn ands<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd     = instruction.rd();
     let rn     = instruction.rn();
@@ -529,7 +536,7 @@ fn ands<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_c(c);
 }
 
-fn eor<M>(instruction: Instruction, cpu: &mut Cpu)
+fn eor<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
@@ -544,7 +551,7 @@ fn eor<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val);
 }
 
-fn eors<M>(instruction: Instruction, cpu: &mut Cpu)
+fn eors<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd     = instruction.rd();
     let rn     = instruction.rn();
@@ -567,7 +574,7 @@ fn eors<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_c(c);
 }
 
-fn sub<M>(instruction: Instruction, cpu: &mut Cpu)
+fn sub<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let dst = instruction.rd();
     let rn  = instruction.rn();
@@ -582,7 +589,7 @@ fn sub<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(dst, val);
 }
 
-fn subs<M>(instruction: Instruction, cpu: &mut Cpu)
+fn subs<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd  = instruction.rd();
     let rn  = instruction.rn();
@@ -610,7 +617,7 @@ fn subs<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
-fn rsb<M>(instruction: Instruction, cpu: &mut Cpu)
+fn rsb<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
@@ -625,7 +632,7 @@ fn rsb<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val);
 }
 
-fn rsbs<M>(instruction: Instruction, cpu: &mut Cpu)
+fn rsbs<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
@@ -653,7 +660,7 @@ fn rsbs<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
-fn add<M>(instruction: Instruction, cpu: &mut Cpu)
+fn add<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
@@ -668,7 +675,7 @@ fn add<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val);
 }
 
-fn adds<M>(instruction: Instruction, cpu: &mut Cpu)
+fn adds<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
@@ -696,7 +703,7 @@ fn adds<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_v((a_neg == b_neg) & (a_neg ^ v_neg));
 }
 
-fn adc<M>(instruction: Instruction, cpu: &mut Cpu)
+fn adc<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let dst = instruction.rd();
     let rn  = instruction.rn();
@@ -712,7 +719,7 @@ fn adc<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(dst, val);
 }
 
-fn tst<M>(instruction: Instruction, cpu: &mut Cpu)
+fn tst<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rn     = instruction.rn();
     let rd     = instruction.rd();
@@ -734,7 +741,7 @@ fn tst<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_c(c);
 }
 
-fn teq<M>(instruction: Instruction, cpu: &mut Cpu)
+fn teq<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rn     = instruction.rn();
     let rd     = instruction.rd();
@@ -756,7 +763,7 @@ fn teq<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_c(c);
 }
 
-fn cmp<M>(instruction: Instruction, cpu: &mut Cpu)
+fn cmp<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rn  = instruction.rn();
     let rd  = instruction.rd();
@@ -783,7 +790,7 @@ fn cmp<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
-fn cmn<M>(instruction: Instruction, cpu: &mut Cpu)
+fn cmn<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rn  = instruction.rn();
     let rd  = instruction.rd();
@@ -810,7 +817,7 @@ fn cmn<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
-fn orr<M>(instruction: Instruction, cpu: &mut Cpu)
+fn orr<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd = instruction.rd();
     let rn = instruction.rn();
@@ -825,7 +832,7 @@ fn orr<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val);
 }
 
-fn orrs<M>(instruction: Instruction, cpu: &mut Cpu)
+fn orrs<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd     = instruction.rd();
     let rn     = instruction.rn();
@@ -848,7 +855,7 @@ fn orrs<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_c(c);
 }
 
-fn mov<M>(instruction: Instruction, cpu: &mut Cpu)
+fn mov<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd  = instruction.rd();
     let rn  = instruction.rn();
@@ -864,7 +871,7 @@ fn mov<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val);
 }
 
-fn movs<M>(instruction: Instruction, cpu: &mut Cpu)
+fn movs<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd       = instruction.rd();
     let (val, c) = M::value_carry(instruction, cpu);
@@ -882,7 +889,7 @@ fn movs<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_c(c);
 }
 
-fn bic<M>(instruction: Instruction, cpu: &mut Cpu)
+fn bic<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd  = instruction.rd();
     let rn  = instruction.rn();
@@ -897,7 +904,7 @@ fn bic<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(rd, val);
 }
 
-fn bics<M>(instruction: Instruction, cpu: &mut Cpu)
+fn bics<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let rd     = instruction.rd();
     let rn     = instruction.rn();
@@ -920,7 +927,7 @@ fn bics<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_c(c);
 }
 
-fn mvn<M>(instruction: Instruction, cpu: &mut Cpu)
+fn mvn<M>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where M: Mode1Addressing {
     let dst = instruction.rd();
     let rn = instruction.rn();
@@ -936,7 +943,7 @@ fn mvn<M>(instruction: Instruction, cpu: &mut Cpu)
     cpu.set_reg(dst, !val);
 }
 
-fn mul<S>(instruction: Instruction, cpu: &mut Cpu)
+fn mul<S>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where S: ModeFlag {
     let rm  = instruction.rm();
     let rs  = instruction.rs();
@@ -958,7 +965,7 @@ fn mul<S>(instruction: Instruction, cpu: &mut Cpu)
     }
 }
 
-fn mla<S>(instruction: Instruction, cpu: &mut Cpu)
+fn mla<S>(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu)
     where S: ModeFlag {
     let rm  = instruction.rm();
     let rs  = instruction.rs();
@@ -1211,7 +1218,7 @@ impl Mode2Addressing for Mode2LslRegPre {
     }
 }
 
-fn ldr<M, U>(instruction: Instruction, cpu: &mut Cpu)
+fn ldr<M, U>(instruction: Instruction, debugger: &mut Debugger, cpu: &mut Cpu)
     where M: Mode2Addressing, U: ModeFlag {
     let rd   = instruction.rd();
     let addr = M::address::<U>(instruction, cpu);
@@ -1223,12 +1230,12 @@ fn ldr<M, U>(instruction: Instruction, cpu: &mut Cpu)
     let rot = (addr & 3) * 8;
     let addr = addr & !3;
 
-    let val = cpu.load32(addr).rotate_right(rot);
+    let val = cpu.load::<Word>(debugger, addr).rotate_right(rot);
 
     cpu.set_reg_pc_mask(rd, val);
 }
 
-fn str<M, U>(instruction: Instruction, cpu: &mut Cpu)
+fn str<M, U>(instruction: Instruction, debugger: &mut Debugger, cpu: &mut Cpu)
     where M: Mode2Addressing, U: ModeFlag {
     let rd   = instruction.rd();
     let addr = M::address::<U>(instruction, cpu);
@@ -1242,22 +1249,22 @@ fn str<M, U>(instruction: Instruction, cpu: &mut Cpu)
 
     let val = cpu.reg(rd);
 
-    cpu.store32(addr, val);
+    cpu.store::<Word>(debugger, addr, val);
 }
 
-fn ldrb<M, U>(instruction: Instruction, cpu: &mut Cpu)
+fn ldrb<M, U>(instruction: Instruction, debugger: &mut Debugger, cpu: &mut Cpu)
     where M: Mode2Addressing, U: ModeFlag {
     let rd   = instruction.rd();
     let addr = M::address::<U>(instruction, cpu);
 
     debug_assert!(M::is_valid::<U>(instruction, true, true));
 
-    let val = cpu.load8(addr);
+    let val = cpu.load::<Byte>(debugger, addr);
 
     cpu.set_reg_pc_mask(rd, val as u32);
 }
 
-fn strb<M, U>(instruction: Instruction, cpu: &mut Cpu)
+fn strb<M, U>(instruction: Instruction, debugger: &mut Debugger, cpu: &mut Cpu)
     where M: Mode2Addressing, U: ModeFlag {
     let rd   = instruction.rd();
     let addr = M::address::<U>(instruction, cpu);
@@ -1272,7 +1279,7 @@ fn strb<M, U>(instruction: Instruction, cpu: &mut Cpu)
 
     let val = cpu.reg(rd);
 
-    cpu.store8(addr, val);
+    cpu.store::<Byte>(debugger, addr, val);
 }
 
 /// Addressing mode 3: Miscellaneous Loads and Stores
@@ -1462,31 +1469,31 @@ impl Mode3Addressing for Mode3Reg {
     }
 }
 
-fn ldrh<M, U>(instruction: Instruction, cpu: &mut Cpu)
+fn ldrh<M, U>(instruction: Instruction, debugger: &mut Debugger, cpu: &mut Cpu)
     where M: Mode3Addressing, U: ModeFlag {
     let rd   = instruction.rd();
     let addr = M::address::<U>(instruction, cpu);
 
     debug_assert!(M::is_valid::<U>(instruction, true, false, false));
 
-    let val = cpu.load16(addr);
+    let val = cpu.load::<HalfWord>(debugger, addr);
 
     cpu.set_reg(rd, val as u32)
 }
 
-fn ldrsh<M, U>(instruction: Instruction, cpu: &mut Cpu)
+fn ldrsh<M, U>(instruction: Instruction, debugger: &mut Debugger, cpu: &mut Cpu)
     where M: Mode3Addressing, U: ModeFlag {
     let rd   = instruction.rd();
     let addr = M::address::<U>(instruction, cpu);
 
     debug_assert!(M::is_valid::<U>(instruction, true, false, true));
 
-    let val = cpu.load16(addr) as i16;
+    let val = cpu.load::<HalfWord>(debugger, addr) as i16;
 
     cpu.set_reg(rd, val as u32)
 }
 
-fn strh<M, U>(instruction: Instruction, cpu: &mut Cpu)
+fn strh<M, U>(instruction: Instruction, debugger: &mut Debugger, cpu: &mut Cpu)
     where M: Mode3Addressing, U: ModeFlag {
     let rd   = instruction.rd();
     let addr = M::address::<U>(instruction, cpu);
@@ -1495,17 +1502,17 @@ fn strh<M, U>(instruction: Instruction, cpu: &mut Cpu)
 
     let val = cpu.reg(rd);
 
-    cpu.store16(addr, val);
+    cpu.store::<HalfWord>(debugger, addr, val);
 }
 
-fn ldrsb<M, U>(instruction: Instruction, cpu: &mut Cpu)
+fn ldrsb<M, U>(instruction: Instruction, debugger: &mut Debugger, cpu: &mut Cpu)
     where M: Mode3Addressing, U: ModeFlag {
     let rd   = instruction.rd();
     let addr = M::address::<U>(instruction, cpu);
 
     debug_assert!(M::is_valid::<U>(instruction, true, true, true));
 
-    let val = cpu.load8(addr) as i8;
+    let val = cpu.load::<Byte>(debugger, addr) as i8;
 
     cpu.set_reg(rd, val as u32)
 }
@@ -1538,8 +1545,11 @@ fn mode4_start_wb<U, P>(base: u32, list: u32) -> (u32, u32)
     }
 }
 
-fn ldm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
+fn ldm<U, P, W>(instruction: Instruction,
+                debugger: &mut Debugger,
+                cpu: &mut Cpu)
     where U: ModeFlag, P: ModeFlag, W: ModeFlag {
+
     let rn   = instruction.rn();
     let list = instruction.register_list();
 
@@ -1569,7 +1579,7 @@ fn ldm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
         if ((list >> i) & 1) != 0 {
             let reg = RegisterIndex(i);
 
-            let val = cpu.load32(addr);
+            let val = cpu.load::<Word>(debugger, addr);
 
             cpu.set_reg_pc_mask(reg, val);
 
@@ -1590,8 +1600,11 @@ fn ldm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
 //
 // If PC is missing then it's LDM(2) and it loads *user mode*
 // registers.
-fn ldms<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
+fn ldms<U, P, W>(instruction: Instruction,
+                 debugger: &mut Debugger,
+                 cpu: &mut Cpu)
     where U: ModeFlag, P: ModeFlag, W: ModeFlag {
+
     let rn   = instruction.rn();
     let list = instruction.register_list();
 
@@ -1631,7 +1644,7 @@ fn ldms<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
         if ((list >> i) & 1) != 0 {
             let reg = RegisterIndex(i);
 
-            let val = cpu.load32(addr);
+            let val = cpu.load::<Word>(debugger, addr);
 
             if load_spsr {
                 if i == 15 {
@@ -1639,7 +1652,7 @@ fn ldms<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
                     // restore the SPSR *but* we want to wait until
                     // the writeback is handled, otherwise we might
                     // update a register in the wrong mode.
-                    pc = cpu.load32(addr);
+                    pc = cpu.load::<Word>(debugger, addr);
                 } else {
                     cpu.set_reg(reg, val);
                 }
@@ -1663,7 +1676,9 @@ fn ldms<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
     }
 }
 
-fn stm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
+fn stm<U, P, W>(instruction: Instruction,
+                debugger: &mut Debugger,
+                cpu: &mut Cpu)
     where U: ModeFlag, P: ModeFlag, W: ModeFlag {
     let rn   = instruction.rn();
     let list = instruction.register_list();
@@ -1707,7 +1722,7 @@ fn stm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
             }
 
             let val = cpu.reg(reg);
-            cpu.store32(addr, val);
+            cpu.store::<Word>(debugger, addr, val);
 
             addr = addr.wrapping_add(4);
 
@@ -1720,7 +1735,7 @@ fn stm<U, P, W>(instruction: Instruction, cpu: &mut Cpu)
     }
 }
 
-fn mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
+fn mrs_cpsr(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.rd();
 
     if (instruction.0 & 0xf0fff) != 0xf0000 {
@@ -1732,7 +1747,7 @@ fn mrs_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, cpsr);
 }
 
-fn msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
+fn msr_cpsr(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rm   = instruction.rm();
     let mask = instruction.msr_field_mask();
 
@@ -1745,7 +1760,7 @@ fn msr_cpsr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.msr_cpsr(val, mask);
 }
 
-fn bx(instruction: Instruction, cpu: &mut Cpu) {
+fn bx(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rm = instruction.rm();
 
     if (instruction.0 & 0xfff00) != 0xfff00 {
@@ -1762,7 +1777,7 @@ fn bx(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc_thumb(address, thumb);
 }
 
-fn mrs_spsr(instruction: Instruction, cpu: &mut Cpu) {
+fn mrs_spsr(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.rd();
 
     if rd.is_pc() || (instruction.0 & 0xf0fff) != 0xf0000 {
@@ -1774,7 +1789,7 @@ fn mrs_spsr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn b(instruction: Instruction, cpu: &mut Cpu) {
+fn b(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.branch_imm_offset();
 
     let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
@@ -1782,7 +1797,7 @@ fn b(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc(pc);
 }
 
-fn bl(instruction: Instruction, cpu: &mut Cpu) {
+fn bl(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.branch_imm_offset();
 
     let pc = cpu.registers[15].wrapping_add(offset);
@@ -1794,11 +1809,11 @@ fn bl(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc(pc);
 }
 
-fn swi(_: Instruction, cpu: &mut Cpu) {
+fn swi(_: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     cpu.swi();
 }
 
-static OPCODE_LUT: [fn (Instruction, &mut Cpu); 4096] = [
+static OPCODE_LUT: [fn (Instruction, &mut Debugger, &mut Cpu); 4096] = [
     // 0x000
     and::<Mode1LslImm>, and::<Mode1LslReg>,
     and::<Mode1LsrImm>, and::<Mode1LsrReg>,

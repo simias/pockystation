@@ -2,12 +2,16 @@
 
 use std::fmt;
 
+use memory::{Word, HalfWord, Byte};
+use debugger::Debugger;
+
 use super::{Cpu, RegisterIndex};
 
-pub fn execute(cpu: &mut Cpu, instruction: u16) {
+pub fn execute<D>(cpu: &mut Cpu, debugger: &mut D, instruction: u16)
+    where D: Debugger {
     let instruction = Instruction(instruction);
 
-    instruction.execute(cpu);
+    instruction.execute(debugger, cpu);
 }
 
 impl Instruction {
@@ -124,10 +128,11 @@ impl Instruction {
         val
     }
 
-    fn execute(self, cpu: &mut Cpu) {
+    fn execute<D>(self, debugger: &mut D, cpu: &mut Cpu)
+        where D: Debugger {
         let handler = OPCODE_LUT[self.opcode() as usize];
 
-        handler(self, cpu);
+        handler(self, debugger, cpu);
     }
 }
 
@@ -141,14 +146,14 @@ impl fmt::Display for Instruction {
     }
 }
 
-fn unimplemented(instruction: Instruction, cpu: &mut Cpu) {
+fn unimplemented(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     panic!("Unimplemented instruction {} ({:03x})\n{:?}",
            instruction,
            instruction.opcode(),
            cpu);
 }
 
-fn op00x_lsl_ri5(instruction: Instruction, cpu: &mut Cpu) {
+fn op00x_lsl_ri5(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd     = instruction.reg_0();
     let rm     = instruction.reg_3();
     let shift  = instruction.imm5();
@@ -173,7 +178,7 @@ fn op00x_lsl_ri5(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op02x_lsr_ri5(instruction: Instruction, cpu: &mut Cpu) {
+fn op02x_lsr_ri5(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd     = instruction.reg_0();
     let rm     = instruction.reg_3();
     let shift  = instruction.imm5();
@@ -201,7 +206,7 @@ fn op02x_lsr_ri5(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_c(carry);
 }
 
-fn op04x_asr_ri5(instruction: Instruction, cpu: &mut Cpu) {
+fn op04x_asr_ri5(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd     = instruction.reg_0();
     let rm     = instruction.reg_3();
     let shift  = instruction.imm5();
@@ -231,7 +236,7 @@ fn op04x_asr_ri5(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_c(carry);
 }
 
-fn op06x_add_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op06x_add_rr(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
@@ -244,7 +249,7 @@ fn op06x_add_rr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op06x_sub_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op06x_sub_rr(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
@@ -257,7 +262,7 @@ fn op06x_sub_rr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op07x_add_i3(instruction: Instruction, cpu: &mut Cpu) {
+fn op07x_add_i3(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let b  = instruction.imm3();
@@ -269,7 +274,7 @@ fn op07x_add_i3(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op07x_sub_i3(instruction: Instruction, cpu: &mut Cpu) {
+fn op07x_sub_i3(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let b  = instruction.imm3();
@@ -281,7 +286,7 @@ fn op07x_sub_i3(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op08x_mov_i8(instruction: Instruction, cpu: &mut Cpu) {
+fn op08x_mov_i8(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd  = instruction.reg_8();
     let val = instruction.imm8();
 
@@ -291,7 +296,7 @@ fn op08x_mov_i8(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op0ax_cmp_i8(instruction: Instruction, cpu: &mut Cpu) {
+fn op0ax_cmp_i8(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rn  = instruction.reg_8();
     let b   = instruction.imm8();
 
@@ -309,7 +314,7 @@ fn op0ax_cmp_i8(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_v((a_neg ^ b_neg) & (a_neg ^ v_neg));
 }
 
-fn op0cx_add_i8(instruction: Instruction, cpu: &mut Cpu) {
+fn op0cx_add_i8(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd  = instruction.reg_8();
     let b   = instruction.imm8();
 
@@ -320,7 +325,7 @@ fn op0cx_add_i8(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op0ex_sub_i8(instruction: Instruction, cpu: &mut Cpu) {
+fn op0ex_sub_i8(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd  = instruction.reg_8();
     let b   = instruction.imm8();
 
@@ -331,7 +336,7 @@ fn op0ex_sub_i8(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op100_and(instruction: Instruction, cpu: &mut Cpu) {
+fn op100_and(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -345,7 +350,7 @@ fn op100_and(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op101_eor(instruction: Instruction, cpu: &mut Cpu) {
+fn op101_eor(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -359,7 +364,7 @@ fn op101_eor(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op102_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
+fn op102_lsl_r(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rs = instruction.reg_3();
 
@@ -395,7 +400,7 @@ fn op102_lsl_r(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op103_lsr_r(instruction: Instruction, cpu: &mut Cpu) {
+fn op103_lsr_r(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rs = instruction.reg_3();
 
@@ -430,7 +435,7 @@ fn op103_lsr_r(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op104_asr_r(instruction: Instruction, cpu: &mut Cpu) {
+fn op104_asr_r(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rs = instruction.reg_3();
 
@@ -459,7 +464,7 @@ fn op104_asr_r(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op105_adc_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op105_adc_rr(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -481,7 +486,7 @@ fn op105_adc_rr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_v((a_neg == b_neg) & (a_neg ^ v_neg));
 }
 
-fn op107_ror(instruction: Instruction, cpu: &mut Cpu) {
+fn op107_ror(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rs = instruction.reg_3();
 
@@ -509,7 +514,7 @@ fn op107_ror(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op108_tst(instruction: Instruction, cpu: &mut Cpu) {
+fn op108_tst(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rn = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -522,7 +527,7 @@ fn op108_tst(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op109_neg(instruction: Instruction, cpu: &mut Cpu) {
+fn op109_neg(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -533,7 +538,7 @@ fn op109_neg(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op10a_cmp(instruction: Instruction, cpu: &mut Cpu) {
+fn op10a_cmp(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rn = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -543,7 +548,7 @@ fn op10a_cmp(instruction: Instruction, cpu: &mut Cpu) {
     instruction.subs(cpu, a, b);
 }
 
-fn op10b_cmn(instruction: Instruction, cpu: &mut Cpu) {
+fn op10b_cmn(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rn = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -553,7 +558,7 @@ fn op10b_cmn(instruction: Instruction, cpu: &mut Cpu) {
     instruction.adds(cpu, a, b);
 }
 
-fn op10c_orr(instruction: Instruction, cpu: &mut Cpu) {
+fn op10c_orr(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -567,7 +572,7 @@ fn op10c_orr(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op10d_mul(instruction: Instruction, cpu: &mut Cpu) {
+fn op10d_mul(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -581,7 +586,7 @@ fn op10d_mul(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op10e_bic(instruction: Instruction, cpu: &mut Cpu) {
+fn op10e_bic(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -593,7 +598,7 @@ fn op10e_bic(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op10f_mvn(instruction: Instruction, cpu: &mut Cpu) {
+fn op10f_mvn(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rm = instruction.reg_3();
 
@@ -604,7 +609,7 @@ fn op10f_mvn(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_z(val == 0);
 }
 
-fn op111_add_hi(instruction: Instruction, cpu: &mut Cpu) {
+fn op111_add_hi(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rm = instruction.reg_3_full();
     let rd = instruction.reg_0_full();
 
@@ -616,7 +621,7 @@ fn op111_add_hi(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op115_cmp_hi(instruction: Instruction, cpu: &mut Cpu) {
+fn op115_cmp_hi(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rn = instruction.reg_0_full();
     let rm = instruction.reg_3_full();
 
@@ -626,7 +631,7 @@ fn op115_cmp_hi(instruction: Instruction, cpu: &mut Cpu) {
     instruction.subs(cpu, a, b);
 }
 
-fn op11c_bx(instruction: Instruction, cpu: &mut Cpu) {
+fn op11c_bx(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rm = instruction.reg_3_full();
 
     if (instruction.0 & 7) != 0 {
@@ -642,7 +647,7 @@ fn op11c_bx(instruction: Instruction, cpu: &mut Cpu) {
 }
 
 /// Also known as MOV(3)
-fn op118_cpy(instruction: Instruction, cpu: &mut Cpu) {
+fn op118_cpy(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rm = instruction.reg_3_full();
     let rd = instruction.reg_0_full();
 
@@ -659,7 +664,9 @@ fn op118_cpy(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val);
 }
 
-fn op12x_ldr_pc(instruction: Instruction, cpu: &mut Cpu) {
+fn op12x_ldr_pc(instruction: Instruction,
+                debugger: &mut Debugger,
+                cpu: &mut Cpu) {
     let rd = instruction.reg_8();
     let offset = instruction.imm8() << 2;
 
@@ -667,12 +674,14 @@ fn op12x_ldr_pc(instruction: Instruction, cpu: &mut Cpu) {
 
     let addr = base.wrapping_add(offset);
 
-    let val = cpu.load32(addr);
+    let val = cpu.load::<Word>(debugger, addr);
 
     cpu.set_reg(rd, val);
 }
 
-fn op14x_str_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op14x_str_rr(instruction: Instruction,
+                debugger: &mut Debugger,
+                cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
@@ -681,10 +690,12 @@ fn op14x_str_rr(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.reg(rd);
 
-    cpu.store32(addr, val);
+    cpu.store::<Word>(debugger, addr, val);
 }
 
-fn op14x_strh_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op14x_strh_rr(instruction: Instruction,
+                 debugger: &mut Debugger,
+                 cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
@@ -697,10 +708,12 @@ fn op14x_strh_rr(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.reg(rd);
 
-    cpu.store16(addr, val);
+    cpu.store::<HalfWord>(debugger, addr, val);
 }
 
-fn op15x_strb_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op15x_strb_rr(instruction: Instruction,
+                 debugger: &mut Debugger,
+                 cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
@@ -709,70 +722,82 @@ fn op15x_strb_rr(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.reg(rd);
 
-    cpu.store8(addr, val);
+    cpu.store::<Byte>(debugger, addr, val);
 }
 
-fn op15x_ldrsb_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op15x_ldrsb_rr(instruction: Instruction,
+                  debugger: &mut Debugger,
+                  cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
 
     let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
 
-    let val = cpu.load8(addr) as i8;
+    let val = cpu.load::<Byte>(debugger, addr) as i8;
 
     cpu.set_reg(rd, val as u32);
 }
 
-fn op16x_ldr_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op16x_ldr_rr(instruction: Instruction,
+                debugger: &mut Debugger,
+                cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
 
     let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
 
-    let val = cpu.load32(addr);
+    let val = cpu.load::<Word>(debugger, addr);
 
     cpu.set_reg(rd, val);
 }
 
-fn op16x_ldrh_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op16x_ldrh_rr(instruction: Instruction,
+                 debugger: &mut Debugger,
+                 cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
 
     let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
 
-    let val = cpu.load16(addr);
+    let val = cpu.load::<HalfWord>(debugger, addr);
 
     cpu.set_reg(rd, val as u32);
 }
 
-fn op17x_ldrb_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op17x_ldrb_rr(instruction: Instruction,
+                 debugger: &mut Debugger,
+                 cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
 
     let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
 
-    let val = cpu.load8(addr);
+    let val = cpu.load::<Byte>(debugger, addr);
 
     cpu.set_reg(rd, val as u32);
 }
 
-fn op17x_ldrsh_rr(instruction: Instruction, cpu: &mut Cpu) {
+fn op17x_ldrsh_rr(instruction: Instruction,
+                  debugger: &mut Debugger,
+                  cpu: &mut Cpu) {
     let rd = instruction.reg_0();
     let rn = instruction.reg_3();
     let rm = instruction.reg_6();
 
     let addr = cpu.reg(rn).wrapping_add(cpu.reg(rm));
 
-    let val = cpu.load16(addr) as i16;
+    let val = cpu.load::<HalfWord>(debugger, addr) as i16;
 
     cpu.set_reg(rd, val as u32);
 }
 
-fn op18x_str_ri5(instruction: Instruction, cpu: &mut Cpu) {
+fn op18x_str_ri5(instruction: Instruction,
+                 debugger: &mut Debugger,
+                 cpu: &mut Cpu) {
     let rd     = instruction.reg_0();
     let rn     = instruction.reg_3();
     let offset = instruction.imm5() << 2;
@@ -783,10 +808,12 @@ fn op18x_str_ri5(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.reg(rd);
 
-    cpu.store32(addr, val);
+    cpu.store::<Word>(debugger, addr, val);
 }
 
-fn op1ax_ldr_ri5(instruction: Instruction, cpu: &mut Cpu) {
+fn op1ax_ldr_ri5(instruction: Instruction,
+                 debugger: &mut Debugger,
+                 cpu: &mut Cpu) {
     let rd     = instruction.reg_0();
     let rn     = instruction.reg_3();
     let offset = instruction.imm5() << 2;
@@ -795,12 +822,14 @@ fn op1ax_ldr_ri5(instruction: Instruction, cpu: &mut Cpu) {
 
     let addr = base.wrapping_add(offset);
 
-    let val = cpu.load32(addr);
+    let val = cpu.load::<Word>(debugger, addr);
 
     cpu.set_reg(rd, val);
 }
 
-fn op1cx_strb_ri5(instruction: Instruction, cpu: &mut Cpu) {
+fn op1cx_strb_ri5(instruction: Instruction,
+                  debugger: &mut Debugger,
+                  cpu: &mut Cpu) {
     let rd     = instruction.reg_0();
     let rn     = instruction.reg_3();
     let offset = instruction.imm5();
@@ -809,22 +838,26 @@ fn op1cx_strb_ri5(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.reg(rd);
 
-    cpu.store8(addr, val);
+    cpu.store::<Byte>(debugger, addr, val);
 }
 
-fn op1ex_ldrb_ri5(instruction: Instruction, cpu: &mut Cpu) {
+fn op1ex_ldrb_ri5(instruction: Instruction,
+                  debugger: &mut Debugger,
+                  cpu: &mut Cpu) {
     let rd     = instruction.reg_0();
     let rn     = instruction.reg_3();
     let offset = instruction.imm5();
 
     let addr = cpu.reg(rn).wrapping_add(offset);
 
-    let val = cpu.load8(addr);
+    let val = cpu.load::<Byte>(debugger, addr);
 
     cpu.set_reg(rd, val as u32);
 }
 
-fn op20x_strh_ri5(instruction: Instruction, cpu: &mut Cpu) {
+fn op20x_strh_ri5(instruction: Instruction,
+                  debugger: &mut Debugger,
+                  cpu: &mut Cpu) {
     let rd     = instruction.reg_0();
     let rn     = instruction.reg_3();
     let offset = instruction.imm5() << 1;
@@ -837,22 +870,26 @@ fn op20x_strh_ri5(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.reg(rd);
 
-    cpu.store16(addr, val);
+    cpu.store::<HalfWord>(debugger, addr, val);
 }
 
-fn op22x_ldrh_ri5(instruction: Instruction, cpu: &mut Cpu) {
+fn op22x_ldrh_ri5(instruction: Instruction,
+                  debugger: &mut Debugger,
+                  cpu: &mut Cpu) {
     let rd     = instruction.reg_0();
     let rn     = instruction.reg_3();
     let offset = instruction.imm5() << 1;
 
     let addr = cpu.reg(rn).wrapping_add(offset);
 
-    let val = cpu.load16(addr);
+    let val = cpu.load::<HalfWord>(debugger, addr);
 
     cpu.set_reg(rd, val as u32);
 }
 
-fn op24x_str_sp(instruction: Instruction, cpu: &mut Cpu) {
+fn op24x_str_sp(instruction: Instruction,
+                debugger: &mut Debugger,
+                cpu: &mut Cpu) {
     let rd  = instruction.reg_8();
     let imm = instruction.imm8() << 2;
 
@@ -862,10 +899,12 @@ fn op24x_str_sp(instruction: Instruction, cpu: &mut Cpu) {
 
     let val = cpu.reg(rd);
 
-    cpu.store32(addr, val);
+    cpu.store::<Word>(debugger, addr, val);
 }
 
-fn op26x_ldr_sp(instruction: Instruction, cpu: &mut Cpu) {
+fn op26x_ldr_sp(instruction: Instruction,
+                debugger: &mut Debugger,
+                cpu: &mut Cpu) {
     let rd  = instruction.reg_8();
     let imm = instruction.imm8() << 2;
 
@@ -873,12 +912,12 @@ fn op26x_ldr_sp(instruction: Instruction, cpu: &mut Cpu) {
 
     let addr = cpu.reg(sp).wrapping_add(imm);
 
-    let val = cpu.load32(addr);
+    let val = cpu.load::<Word>(debugger, addr);
 
     cpu.set_reg(rd, val);
 }
 
-fn op28x_add_pc(instruction: Instruction, cpu: &mut Cpu) {
+fn op28x_add_pc(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd  = instruction.reg_8();
     let offset = instruction.imm8() << 2;
 
@@ -889,7 +928,7 @@ fn op28x_add_pc(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val & !3);
 }
 
-fn op2ax_add_sp_i(instruction: Instruction, cpu: &mut Cpu) {
+fn op2ax_add_sp_i(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let rd     = instruction.reg_8();
     let offset = instruction.imm8() << 2;
 
@@ -900,7 +939,7 @@ fn op2ax_add_sp_i(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rd, val.wrapping_add(offset));
 }
 
-fn op2c0_add_sp(instruction: Instruction, cpu: &mut Cpu) {
+fn op2c0_add_sp(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.imm7() << 2;
 
     let sp = RegisterIndex(13);
@@ -910,7 +949,7 @@ fn op2c0_add_sp(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(sp, val.wrapping_add(offset));
 }
 
-fn op2c2_sub_sp(instruction: Instruction, cpu: &mut Cpu) {
+fn op2c2_sub_sp(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.imm7() << 2;
 
     let sp = RegisterIndex(13);
@@ -920,7 +959,9 @@ fn op2c2_sub_sp(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(sp, val.wrapping_sub(offset));
 }
 
-fn op2d0_push(instruction: Instruction, cpu: &mut Cpu) {
+fn op2d0_push(instruction: Instruction,
+              debugger: &mut Debugger,
+              cpu: &mut Cpu) {
     let list = instruction.register_list();
 
     // Push are SP-relative
@@ -941,7 +982,7 @@ fn op2d0_push(instruction: Instruction, cpu: &mut Cpu) {
             let reg = RegisterIndex(i);
 
             let val = cpu.reg(reg);
-            cpu.store32(addr, val);
+            cpu.store::<Word>(debugger, addr, val);
 
             addr = addr.wrapping_add(4);
         }
@@ -950,7 +991,9 @@ fn op2d0_push(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(sp, start_addr);
 }
 
-fn op2d4_push_lr(instruction: Instruction, cpu: &mut Cpu) {
+fn op2d4_push_lr(instruction: Instruction,
+                 debugger: &mut Debugger,
+                 cpu: &mut Cpu) {
     let list = instruction.register_list();
 
     // Push are SP-relative
@@ -968,7 +1011,7 @@ fn op2d4_push_lr(instruction: Instruction, cpu: &mut Cpu) {
             let reg = RegisterIndex(i);
 
             let val = cpu.reg(reg);
-            cpu.store32(addr, val);
+            cpu.store::<Word>(debugger, addr, val);
 
             addr = addr.wrapping_add(4);
         }
@@ -976,12 +1019,14 @@ fn op2d4_push_lr(instruction: Instruction, cpu: &mut Cpu) {
 
     // Push LR
     let lr = cpu.reg(RegisterIndex(14));
-    cpu.store32(addr, lr);
+    cpu.store::<Word>(debugger, addr, lr);
 
     cpu.set_reg(sp, start_addr);
 }
 
-fn op2f0_pop(instruction: Instruction, cpu: &mut Cpu) {
+fn op2f0_pop(instruction: Instruction,
+             debugger: &mut Debugger,
+             cpu: &mut Cpu) {
     let list = instruction.register_list();
 
     // Pop are SP-relative
@@ -999,7 +1044,7 @@ fn op2f0_pop(instruction: Instruction, cpu: &mut Cpu) {
         if ((list >> i) & 1) != 0 {
             let reg = RegisterIndex(i);
 
-            let val = cpu.load32(addr);
+            let val = cpu.load::<Word>(debugger, addr);
 
             cpu.set_reg(reg, val);
 
@@ -1010,7 +1055,9 @@ fn op2f0_pop(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(sp, addr);
 }
 
-fn op2f4_pop_pc(instruction: Instruction, cpu: &mut Cpu) {
+fn op2f4_pop_pc(instruction: Instruction,
+                debugger: &mut Debugger,
+                cpu: &mut Cpu) {
     let list = instruction.register_list();
 
     // Pop are SP-relative
@@ -1022,7 +1069,7 @@ fn op2f4_pop_pc(instruction: Instruction, cpu: &mut Cpu) {
         if ((list >> i) & 1) != 0 {
             let reg = RegisterIndex(i);
 
-            let val = cpu.load32(addr);
+            let val = cpu.load::<Word>(debugger, addr);
 
             cpu.set_reg(reg, val);
 
@@ -1031,14 +1078,16 @@ fn op2f4_pop_pc(instruction: Instruction, cpu: &mut Cpu) {
     }
 
     // Load PC
-    let pc = cpu.load32(addr);
+    let pc = cpu.load::<Word>(debugger, addr);
     cpu.set_pc(pc & !1);
     addr = addr.wrapping_add(4);
 
     cpu.set_reg(sp, addr);
 }
 
-fn op30x_stmia(instruction: Instruction, cpu: &mut Cpu) {
+fn op30x_stmia(instruction: Instruction,
+               debugger: &mut Debugger,
+               cpu: &mut Cpu) {
     let list = instruction.register_list();
     let rn   = instruction.reg_8();
 
@@ -1058,7 +1107,7 @@ fn op30x_stmia(instruction: Instruction, cpu: &mut Cpu) {
             }
 
             let val = cpu.reg(reg);
-            cpu.store32(addr, val);
+            cpu.store::<Word>(debugger, addr, val);
 
             addr = addr.wrapping_add(4);
             first = false;
@@ -1068,7 +1117,9 @@ fn op30x_stmia(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(rn, addr);
 }
 
-fn op32x_ldmia(instruction: Instruction, cpu: &mut Cpu) {
+fn op32x_ldmia(instruction: Instruction,
+               debugger: &mut Debugger,
+               cpu: &mut Cpu) {
     let list = instruction.register_list();
     let rn   = instruction.reg_8();
 
@@ -1085,7 +1136,7 @@ fn op32x_ldmia(instruction: Instruction, cpu: &mut Cpu) {
         if ((list >> i) & 1) != 0 {
             let reg = RegisterIndex(i);
 
-            let val = cpu.load32(addr);
+            let val = cpu.load::<Word>(debugger, addr);
 
             cpu.set_reg(reg, val);
 
@@ -1094,7 +1145,7 @@ fn op32x_ldmia(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op340_beq(instruction: Instruction, cpu: &mut Cpu) {
+fn op340_beq(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if cpu.z() {
@@ -1104,7 +1155,7 @@ fn op340_beq(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op344_bne(instruction: Instruction, cpu: &mut Cpu) {
+fn op344_bne(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if !cpu.z() {
@@ -1114,7 +1165,7 @@ fn op344_bne(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op348_bcs(instruction: Instruction, cpu: &mut Cpu) {
+fn op348_bcs(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if cpu.c() {
@@ -1124,7 +1175,7 @@ fn op348_bcs(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op34c_bcc(instruction: Instruction, cpu: &mut Cpu) {
+fn op34c_bcc(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if !cpu.c() {
@@ -1134,7 +1185,7 @@ fn op34c_bcc(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op350_bmi(instruction: Instruction, cpu: &mut Cpu) {
+fn op350_bmi(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if cpu.n() {
@@ -1144,7 +1195,7 @@ fn op350_bmi(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op354_bpl(instruction: Instruction, cpu: &mut Cpu) {
+fn op354_bpl(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if !cpu.n() {
@@ -1154,7 +1205,7 @@ fn op354_bpl(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op360_bhi(instruction: Instruction, cpu: &mut Cpu) {
+fn op360_bhi(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if cpu.c() && !cpu.z() {
@@ -1164,7 +1215,7 @@ fn op360_bhi(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op364_bls(instruction: Instruction, cpu: &mut Cpu) {
+fn op364_bls(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if !cpu.c() || cpu.z() {
@@ -1174,7 +1225,7 @@ fn op364_bls(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op368_bge(instruction: Instruction, cpu: &mut Cpu) {
+fn op368_bge(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if cpu.n() == cpu.v() {
@@ -1184,7 +1235,7 @@ fn op368_bge(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op36c_blt(instruction: Instruction, cpu: &mut Cpu) {
+fn op36c_blt(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if cpu.n() != cpu.v() {
@@ -1194,7 +1245,7 @@ fn op36c_blt(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op370_bgt(instruction: Instruction, cpu: &mut Cpu) {
+fn op370_bgt(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if !cpu.z() && (cpu.n() == cpu.v()) {
@@ -1204,7 +1255,7 @@ fn op370_bgt(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op374_ble(instruction: Instruction, cpu: &mut Cpu) {
+fn op374_ble(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm8() << 1;
 
     if cpu.z() || (cpu.n() != cpu.v()) {
@@ -1214,11 +1265,11 @@ fn op374_ble(instruction: Instruction, cpu: &mut Cpu) {
     }
 }
 
-fn op37c_swi(_: Instruction, cpu: &mut Cpu) {
+fn op37c_swi(_: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     cpu.swi()
 }
 
-fn op38x_b(instruction: Instruction, cpu: &mut Cpu) {
+fn op38x_b(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset = instruction.signed_imm11() << 1;
 
     let pc = cpu.reg(RegisterIndex(15)).wrapping_add(offset);
@@ -1226,7 +1277,7 @@ fn op38x_b(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc(pc);
 }
 
-fn op3cx_bl_hi(instruction: Instruction, cpu: &mut Cpu) {
+fn op3cx_bl_hi(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     // This instruction is coded on two successive half words. The
     // reference manual says that it's implementation defined
     // whether interrupts can happen between the two
@@ -1246,7 +1297,7 @@ fn op3cx_bl_hi(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_reg(RegisterIndex(14), partial_target)
 }
 
-fn op3ex_bl_lo(instruction: Instruction, cpu: &mut Cpu) {
+fn op3ex_bl_lo(instruction: Instruction, _: &mut Debugger, cpu: &mut Cpu) {
     let offset_lo = instruction.b_imm_offset_11() << 1;
 
     let target = cpu.reg(RegisterIndex(14)).wrapping_add(offset_lo);
@@ -1258,7 +1309,7 @@ fn op3ex_bl_lo(instruction: Instruction, cpu: &mut Cpu) {
     cpu.set_pc(target);
 }
 
-static OPCODE_LUT: [fn (Instruction, &mut Cpu); 1024] = [
+static OPCODE_LUT: [fn (Instruction, &mut Debugger, &mut Cpu); 1024] = [
     // 0x000
     op00x_lsl_ri5, op00x_lsl_ri5, op00x_lsl_ri5, op00x_lsl_ri5,
     op00x_lsl_ri5, op00x_lsl_ri5, op00x_lsl_ri5, op00x_lsl_ri5,

@@ -2,7 +2,7 @@ use std::fmt;
 use std::mem::swap;
 use std::panic;
 
-use memory::{Interconnect, Addressable, Word, HalfWord, Byte};
+use memory::{Interconnect, Addressable, Word, HalfWord};
 use debugger::Debugger;
 
 mod armv4_is;
@@ -156,7 +156,7 @@ impl Cpu {
 
             let instruction = self.inter.load::<HalfWord>(pc) as u16;
 
-            thumbv1_is::execute(self, instruction);
+            thumbv1_is::execute(self, debugger, instruction);
 
         } else {
             // In ARM mode the PC register (R15) always points to the
@@ -172,7 +172,7 @@ impl Cpu {
 
             let instruction = self.inter.load::<Word>(pc);
 
-            armv4_is::execute(self, instruction);
+            armv4_is::execute(self, debugger, instruction);
         }
     }
 
@@ -524,44 +524,38 @@ impl Cpu {
         }
     }
 
-    fn load32(&mut self, addr: u32) -> u32 {
-        if addr & 3 != 0 {
-            panic!("Unaligned load32! 0x{:08x} {:?}", addr, self);
+    fn load<A>(&mut self, debugger: &mut Debugger, addr: u32) -> u32
+        where A: Addressable {
+
+        debugger.memory_read(self, addr);
+
+        let align = (A::size() - 1) as u32;
+
+        if addr & align != 0 {
+            panic!("Unaligned load{}! 0x{:08x} {:?}",
+                   A::size() * 8,
+                   addr,
+                   self);
         }
 
-        self.inter.load::<Word>(addr & !3)
+        self.inter.load::<A>(addr)
     }
 
-    fn store32(&mut self, addr: u32, val: u32) {
-        if addr & 3 != 0 {
-            panic!("Unaligned store32! 0x{:08x} {:?}", addr, self);
+    fn store<A>(&mut self, debugger: &mut Debugger, addr: u32, val: u32)
+        where A: Addressable {
+
+        debugger.memory_write(self, addr);
+
+        let align = (A::size() - 1) as u32;
+
+        if (addr & align) != 0 {
+            panic!("Unaligned store{}! 0x{:08x} {:?}",
+                   A::size() * 8,
+                   addr,
+                   self);
         }
 
-        self.inter.store::<Word>(addr, val);
-    }
-
-    fn load16(&mut self, addr: u32) -> u16 {
-        if addr & 1 != 0 {
-            panic!("Unaligned load16! 0x{:08x} {:?}", addr, self);
-        }
-
-        self.inter.load::<HalfWord>(addr) as u16
-    }
-
-    fn store16(&mut self, addr: u32, val: u32) {
-        if addr & 1 != 0 {
-            panic!("Unaligned store16! 0x{:08x} {:?}", addr, self);
-        }
-
-        self.inter.store::<HalfWord>(addr, val);
-    }
-
-    fn load8(&mut self, addr: u32) -> u8 {
-        self.inter.load::<Byte>(addr) as u8
-    }
-
-    fn store8(&mut self, addr: u32, val: u32) {
-        self.inter.store::<Byte>(addr, val);
+        self.inter.store::<A>(addr, val);
     }
 }
 
