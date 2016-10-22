@@ -144,8 +144,13 @@ impl Interconnect {
                 },
             0x0b =>
                 match offset {
-                    // CLK MODE: reply that the clock is ready (locked?)
-                    0 => 0x10,
+                    // CLK MODE
+                    0 => {
+                        let div = 7 - self.cpu_clk_div;
+
+                        // Reply that the clock is ready (locked?)
+                        0x10 | div as u32
+                    }
                     0x800000...0x80000c => self.rtc.load::<A>(offset & 0xf),
                     _ => unimplemented(),
                 },
@@ -213,6 +218,10 @@ impl Interconnect {
                 },
             0x0b =>
                 match offset {
+                    // XXX by looking at the kernel code it seems that
+                    // values greater than 8 are possible but treated
+                    // like 8. I need to run some tests on the real
+                    // hardware to make sure.
                     0 => self.cpu_clk_div = 7 - (val & 0x7) as u8,
                     0x800000...0x80000c => self.rtc.store::<A>(offset & 0xf,
                                                                val),
