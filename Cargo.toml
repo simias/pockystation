@@ -1,7 +1,18 @@
 [package]
+
 name = "pockystation"
+
+# Should match the latest git tag! This version info is used to set
+# the internal `VERSION` string if "git describe" is unavailable.
 version = "0.1.0"
-authors = ["Lionel Flandrin <lionel.flandrin@gmail.com>"]
+
+authors = ["Lionel Flandrin <lionel@svkt.org>"]
+homepage = "https://github.com/simias/pockystation"
+repository = "https://github.com/simias/pockystation"
+license = "MIT"
+keywords = ["emulator", "pockystation"]
+
+build = "build.rs"
 
 [dependencies]
 shaman = "0.1.0"
