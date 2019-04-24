@@ -73,7 +73,7 @@ impl Rtc {
                     // XXX Not sure how the paused bit is handled
                     if !self.paused {
                         self.second_elapsed();
-                        println!("RTC: {:?}", self);
+                        debug!("RTC: {:?}", self);
                     }
                 }
 
@@ -274,7 +274,7 @@ impl Rtc {
 
 impl fmt::Debug for Rtc {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}/{}/{} {}:{}:{}",
+        write!(f, "{}.{}.{} {}:{}:{}",
                self.year, self.month, self.day,
                self.hours,
                self.minutes,
