@@ -16,5 +16,5 @@ build = "build.rs"
 
 [dependencies]
 shaman = "0.1.0"
-log = "0.3.6"
+log = "0.4.6"
 rustc-serialize = "0.3.19"
